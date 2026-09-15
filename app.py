@@ -1,12 +1,3 @@
-import streamlit as st
-from openai import OpenAI
-from image_studio import (
-    ProductProfile,
-    build_image_prompt,
-    get_scene_options,
-)
-
-from image_generator import generate_images
 import base64
 import json
 import os
@@ -14,9 +5,17 @@ import os
 import streamlit as st
 from openai import OpenAI
 
+from image_studio import (
+    ProductProfile,
+    build_image_prompt,
+    get_scene_options,
+)
+
+from image_generator import generate_images
+
 
 # =========================================================
-# Page setup
+# PAGE CONFIG
 # =========================================================
 
 st.set_page_config(
@@ -25,84 +24,85 @@ st.set_page_config(
     layout="wide",
 )
 
+
+# =========================================================
+# HEADER
+# =========================================================
+
 st.title("💎 Etsy AI")
-st.subheader("AI Jewelry Listing & Image Studio")
+
+st.subheader(
+    "AI Jewelry Listing & Image Studio"
+)
 
 st.write(
-    "Upload your jewelry images, provide confirmed product facts, "
-    "and generate Etsy-ready SEO content."
+    "Upload jewelry images, analyze the product, "
+    "generate Etsy SEO content, and create professional "
+    "product photography prompts or images."
 )
 
 
 # =========================================================
-# AI System Prompt
+# SYSTEM PROMPT
 # =========================================================
 
 SYSTEM_PROMPT = """
 You are an expert Etsy SEO strategist, jewelry product analyst,
-and American e-commerce copywriter.
+and American e-commerce copywriter for the US Etsy market.
 
-Your target market is primarily US Etsy shoppers.
+Analyze only what is visible in the supplied product images
+and what the seller explicitly provides.
 
-Analyze the supplied jewelry images carefully.
-
-IMPORTANT FACTUAL RULE:
-Never invent product facts.
-
-Do NOT assume:
-- 925 sterling silver
-- gold plating
+Never invent:
 - gemstone identity
-- natural stone
+- metal
 - dimensions
 - weight
 - certification
+- plating
 - handmade status
 - healing properties
 - origin
-- durability claims
+- material composition
+- unsupported product claims
 
-unless the seller explicitly provides or confirms them.
-
-If something cannot be reliably determined from the image,
-describe it visually or leave it out.
+If a fact is uncertain, describe only what is visibly supported
+or leave it out.
 
 Use natural American English.
 
 Avoid keyword stuffing.
 
-The Etsy title should be readable, shopper-friendly,
-and SEO-aware.
+Create persuasive Etsy copy while remaining accurate.
 
-Generate exactly 13 Etsy tags.
-Each tag must contain no more than 20 characters.
+Return valid JSON with exactly these keys:
 
-Return ONLY valid JSON.
+product_analysis
+seo_title
+product_description
+etsy_tags
+search_keywords
+buyer_benefits
+gift_occasions
 
-Required JSON structure:
+product_analysis must contain:
 
-{
-  "product_analysis": {
-    "jewelry_type": "",
-    "materials": [],
-    "gemstone": "",
-    "colors": [],
-    "design_details": [],
-    "style": "",
-    "visual_positioning": ""
-  },
-  "seo_title": "",
-  "product_description": "",
-  "etsy_tags": [],
-  "search_keywords": [],
-  "buyer_benefits": [],
-  "gift_occasions": []
-}
+jewelry_type
+materials
+gemstone
+colors
+design_details
+style
+visual_positioning
+
+etsy_tags must contain exactly 13 strings.
+
+Every Etsy tag must be 20 characters or fewer.
 """
 
 
 # =========================================================
-# Sidebar - confirmed product information
+# SIDEBAR - PRODUCT FACTS
 # =========================================================
 
 with st.sidebar:
@@ -141,15 +141,12 @@ with st.sidebar:
 
     extra_facts = st.text_area(
         "Other Confirmed Facts",
-        placeholder=(
-            "Add any information you want the AI to use.\n"
-            "Example: gold plated, handmade, natural stone, etc."
-        ),
+        placeholder="Add confirmed product information here.",
     )
 
 
 # =========================================================
-# Image upload
+# IMAGE UPLOAD
 # =========================================================
 
 st.header("📷 1. Upload Product Images")
@@ -166,10 +163,6 @@ uploaded_files = st.file_uploader(
 )
 
 
-# =========================================================
-# Display uploaded images
-# =========================================================
-
 if uploaded_files:
 
     st.success(
@@ -177,12 +170,19 @@ if uploaded_files:
     )
 
     columns = st.columns(
-        min(4, len(uploaded_files))
+        min(
+            4,
+            len(uploaded_files),
+        )
     )
 
-    for index, uploaded_file in enumerate(uploaded_files):
+    for index, uploaded_file in enumerate(
+        uploaded_files
+    ):
 
-        with columns[index % len(columns)]:
+        with columns[
+            index % len(columns)
+        ]:
 
             st.image(
                 uploaded_file,
@@ -192,33 +192,36 @@ if uploaded_files:
 
 
 # =========================================================
-# Generate Listing
+# ETSY LISTING GENERATOR
 # =========================================================
 
 if uploaded_files:
 
-    st.header("✨ 2. Generate Etsy Listing")
+    st.header(
+        "✨ 2. Generate Etsy Listing"
+    )
 
-    generate_button = st.button(
+    if st.button(
         "🚀 Analyze Product & Generate Etsy Listing",
         type="primary",
         use_container_width=True,
-    )
+    ):
 
-    if generate_button:
-
-        if not os.getenv("OPENAI_API_KEY"):
+        if not os.getenv(
+            "OPENAI_API_KEY"
+        ):
 
             st.error(
-                "OPENAI_API_KEY is not configured. "
-                "Please add your OpenAI API key to the app environment."
+                "OPENAI_API_KEY is not configured."
             )
 
             st.stop()
 
 
         client = OpenAI(
-            api_key=os.environ["OPENAI_API_KEY"]
+            api_key=os.environ[
+                "OPENAI_API_KEY"
+            ]
         )
 
 
@@ -249,17 +252,16 @@ Other confirmed facts:
 
 
         user_content = [
+
             {
                 "type": "text",
-                "text": confirmed_information
-                + """
 
-Please analyze the uploaded product images.
+                "text":
+                    confirmed_information
+                    +
+                    """
 
-First identify the jewelry visually.
-
-Then combine the visual information
-with the confirmed seller information.
+Analyze all uploaded product images.
 
 Generate:
 
@@ -270,46 +272,44 @@ Generate:
 5. Search Keywords
 6. Buyer Benefits
 7. Gift Occasions
-
-The product itself must remain the source of truth.
-Do not add unsupported claims.
 """,
             }
         ]
 
 
         # -------------------------------------------------
-        # Add product images
+        # ADD PRODUCT IMAGES
         # -------------------------------------------------
 
         for uploaded_file in uploaded_files:
 
-            image_bytes = uploaded_file.getvalue()
-
             encoded_image = base64.b64encode(
-                image_bytes
+                uploaded_file.getvalue()
             ).decode("utf-8")
+
 
             mime_type = (
                 uploaded_file.type
                 or "image/jpeg"
             )
 
+
             user_content.append(
+
                 {
                     "type": "image_url",
+
                     "image_url": {
-                        "url": (
-                            f"data:{mime_type};"
-                            f"base64,{encoded_image}"
-                        )
+
+                        "url":
+                            f"data:{mime_type};base64,{encoded_image}"
                     },
                 }
             )
 
 
         # -------------------------------------------------
-        # Call AI
+        # AI ANALYSIS
         # -------------------------------------------------
 
         with st.spinner(
@@ -318,41 +318,38 @@ Do not add unsupported claims.
 
             try:
 
-                response = client.chat.completions.create(
+                response = (
+                    client.chat.completions.create(
 
-                    model="gpt-4.1-mini",
+                        model="gpt-4.1-mini",
 
-                    response_format={
-                        "type": "json_object"
-                    },
-
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": SYSTEM_PROMPT,
+                        response_format={
+                            "type": "json_object"
                         },
-                        {
-                            "role": "user",
-                            "content": user_content,
-                        },
-                    ],
-                )
 
+                        messages=[
 
-                raw_result = (
-                    response
-                    .choices[0]
-                    .message
-                    .content
+                            {
+                                "role": "system",
+                                "content": SYSTEM_PROMPT,
+                            },
+
+                            {
+                                "role": "user",
+                                "content": user_content,
+                            },
+                        ],
+                    )
                 )
 
 
                 result = json.loads(
-                    raw_result
+                    response.choices[
+                        0
+                    ].message.content
                 )
 
 
-                # Store result
                 st.session_state[
                     "etsy_listing"
                 ] = result
@@ -371,12 +368,14 @@ Do not add unsupported claims.
 
 
 # =========================================================
-# Display Results
+# ETSY LISTING RESULTS
 # =========================================================
 
 result = st.session_state.get(
     "etsy_listing"
 )
+
+analysis = {}
 
 
 if result:
@@ -388,13 +387,14 @@ if result:
     )
 
 
-    # =====================================================
-    # Product Analysis
-    # =====================================================
+    # -----------------------------------------------------
+    # PRODUCT ANALYSIS
+    # -----------------------------------------------------
 
     st.subheader(
         "🔍 Product Analysis"
     )
+
 
     analysis = result.get(
         "product_analysis",
@@ -414,7 +414,7 @@ if result:
         st.write(
             analysis.get(
                 "jewelry_type",
-                ""
+                "",
             )
         )
 
@@ -426,7 +426,7 @@ if result:
         st.write(
             analysis.get(
                 "materials",
-                []
+                [],
             )
         )
 
@@ -438,7 +438,7 @@ if result:
         st.write(
             analysis.get(
                 "gemstone",
-                ""
+                "",
             )
         )
 
@@ -450,7 +450,7 @@ if result:
         st.write(
             analysis.get(
                 "style",
-                ""
+                "",
             )
         )
 
@@ -464,7 +464,7 @@ if result:
         st.write(
             analysis.get(
                 "colors",
-                []
+                [],
             )
         )
 
@@ -473,9 +473,10 @@ if result:
             "**Design Details**"
         )
 
+
         for detail in analysis.get(
             "design_details",
-            []
+            [],
         ):
 
             st.write(
@@ -487,65 +488,66 @@ if result:
             "**Visual Positioning**"
         )
 
+
         st.write(
             analysis.get(
                 "visual_positioning",
-                ""
+                "",
             )
         )
 
 
-    # =====================================================
+    # -----------------------------------------------------
     # SEO TITLE
-    # =====================================================
-
-    st.divider()
+    # -----------------------------------------------------
 
     st.subheader(
         "🏷️ Etsy SEO Title"
     )
 
 
-    title = result.get(
-        "seo_title",
-        ""
-    )
-
-
     st.text_area(
+
         "Title",
-        title,
+
+        result.get(
+            "seo_title",
+            "",
+        ),
+
         height=100,
+
         key="seo_title_output",
     )
 
 
-    # =====================================================
+    # -----------------------------------------------------
     # DESCRIPTION
-    # =====================================================
+    # -----------------------------------------------------
 
     st.subheader(
         "📝 Product Description"
     )
 
 
-    description = result.get(
-        "product_description",
-        ""
-    )
-
-
     st.text_area(
+
         "Description",
-        description,
+
+        result.get(
+            "product_description",
+            "",
+        ),
+
         height=350,
+
         key="description_output",
     )
 
 
-    # =====================================================
+    # -----------------------------------------------------
     # TAGS
-    # =====================================================
+    # -----------------------------------------------------
 
     st.subheader(
         "🔖 13 Etsy Tags"
@@ -562,7 +564,7 @@ if result:
 
         st.warning(
             f"AI returned {len(tags)} tags. "
-            "Etsy listing should contain exactly 13 tags."
+            "Expected exactly 13."
         )
 
 
@@ -571,7 +573,9 @@ if result:
 
     for index, tag in enumerate(tags):
 
-        with tag_columns[index % 3]:
+        with tag_columns[
+            index % 3
+        ]:
 
             st.code(
                 tag,
@@ -579,211 +583,206 @@ if result:
             )
 
 
-    # =====================================================
+    # -----------------------------------------------------
     # SEARCH KEYWORDS
-    # =====================================================
+    # -----------------------------------------------------
 
     st.subheader(
         "🔎 Search Keywords"
     )
 
 
-    keywords = result.get(
+    for keyword in result.get(
         "search_keywords",
-        []
-    )
-
-
-    for keyword in keywords:
+        [],
+    ):
 
         st.write(
             f"• {keyword}"
         )
 
 
-    # =====================================================
+    # -----------------------------------------------------
     # BUYER BENEFITS
-    # =====================================================
+    # -----------------------------------------------------
 
     st.subheader(
         "💎 Buyer Benefits"
     )
 
 
-    benefits = result.get(
+    for benefit in result.get(
         "buyer_benefits",
-        []
-    )
-
-
-    for benefit in benefits:
+        [],
+    ):
 
         st.write(
             f"• {benefit}"
         )
 
 
-    # =====================================================
+    # -----------------------------------------------------
     # GIFT OCCASIONS
-    # =====================================================
+    # -----------------------------------------------------
 
     st.subheader(
         "🎁 Gift Occasions"
     )
 
 
-    occasions = result.get(
+    for occasion in result.get(
         "gift_occasions",
-        []
-    )
-
-
-    for occasion in occasions:
+        [],
+    ):
 
         st.write(
             f"• {occasion}"
         )
 
 
-    # =====================================================
-    # Copy-ready JSON
-    # =====================================================
+    # -----------------------------------------------------
+    # COMPLETE JSON
+    # -----------------------------------------------------
 
-    st.divider()
-
-    st.subheader(
+    with st.expander(
         "📦 Complete Listing Data"
-    )
+    ):
+
+        st.json(
+            result
+        )
 
 
-    st.json(
-        result
-    )
-
-
-    st.info(
-        "V1 complete. Next: AI background replacement, "
-        "lifestyle scenes, model-wearing images, "
-        "and product-only Etsy hero images."
-    )
 # =========================================================
-# V2 - AI IMAGE STUDIO
+# IMAGE STUDIO
 # =========================================================
 
 st.divider()
 
-st.header("🖼️ AI Image Studio")
+st.header(
+    "🖼️ AI Image Studio"
+)
 
 st.write(
-    "Create professional image-generation prompts while "
-    "preserving the original jewelry design."
+    "Create Etsy-ready jewelry photography "
+    "while preserving the original product design."
 )
 
 
+# =========================================================
+# IMAGE MODE
+# =========================================================
+
 image_mode = st.selectbox(
-    "Choose Image Mode",
+
+    "Image Mode",
+
     get_scene_options(),
 )
 
 
-st.subheader("🎨 Scene Settings")
+# =========================================================
+# NUMBER OF IMAGES
+# =========================================================
+
+number_of_images = st.selectbox(
+
+    "Number of Images",
+
+    [1, 2, 4],
+
+    index=0,
+)
+
 
 scene_col1, scene_col2 = st.columns(2)
 
 
 with scene_col1:
 
-    st.write("**Selected Mode**")
-
-    st.info(image_mode)
+    st.info(
+        f"Selected mode: {image_mode}"
+    )
 
 
 with scene_col2:
 
-    st.write("**Recommended Style**")
-
     st.write(
-        "Automatically selected according to "
-        "the product's material, gemstone, and style."
+        "Scene style is automatically selected "
+        "according to the product material, "
+        "gemstone, style, and target customer."
     )
 
 
-if st.button(
-    "✨ Generate Image Prompt",
-    type="primary",
-    use_container_width=True,
-):
+# =========================================================
+# BUILD PRODUCT PROFILE
+# =========================================================
 
-    profile = ProductProfile(
+profile = ProductProfile(
 
-        jewelry_type=analysis.get(
+    jewelry_type=
+        analysis.get(
             "jewelry_type",
             product_name,
         ),
 
-        material=(
-            material
-            or ", ".join(
-                analysis.get(
-                    "materials",
-                    []
-                )
+    material=
+        material
+        or ", ".join(
+            analysis.get(
+                "materials",
+                [],
             )
         ),
 
-        gemstone=(
-            gemstone
-            or analysis.get(
-                "gemstone",
-                ""
-            )
+    gemstone=
+        gemstone
+        or analysis.get(
+            "gemstone",
+            "",
         ),
 
-        dimensions=dimensions,
+    dimensions=
+        dimensions,
 
-        style=(
-            style
-            or analysis.get(
-                "style",
-                ""
-            )
+    style=
+        style
+        or analysis.get(
+            "style",
+            "",
         ),
 
-        extra_facts=extra_facts,
-    )
+    extra_facts=
+        extra_facts,
+)
 
+
+# =========================================================
+# GENERATE IMAGE PROMPT
+# =========================================================
+
+if st.button(
+    "📝 Generate Image Prompt",
+    use_container_width=True,
+):
 
     try:
 
         image_prompt = build_image_prompt(
+
             profile,
+
             image_mode,
         )
 
 
+        st.session_state[
+            "image_prompt"
+        ] = image_prompt
+
+
         st.success(
             "🎉 Image prompt generated!"
-        )
-
-
-        st.subheader(
-            "📋 Image Generation Prompt"
-        )
-
-
-        st.text_area(
-            "Copy this prompt into your image-generation workflow",
-            image_prompt,
-            height=700,
-            key="image_prompt_output",
-        )
-
-
-        st.download_button(
-            "⬇️ Download Prompt",
-            image_prompt,
-            file_name="etsy_image_prompt.txt",
-            mime="text/plain",
         )
 
 
@@ -792,3 +791,225 @@ if st.button(
         st.error(
             f"Image prompt generation failed: {error}"
         )
+
+
+# =========================================================
+# SHOW IMAGE PROMPT
+# =========================================================
+
+if st.session_state.get(
+    "image_prompt"
+):
+
+    st.subheader(
+        "📋 Image Generation Prompt"
+    )
+
+
+    st.text_area(
+
+        "Prompt",
+
+        st.session_state[
+            "image_prompt"
+        ],
+
+        height=500,
+
+        key="image_prompt_output",
+    )
+
+
+    st.download_button(
+
+        "⬇️ Download Prompt",
+
+        st.session_state[
+            "image_prompt"
+        ],
+
+        file_name=
+            "etsy_image_prompt.txt",
+
+        mime=
+            "text/plain",
+    )
+
+
+# =========================================================
+# GENERATE REAL IMAGES
+# =========================================================
+
+if st.button(
+
+    "✨ Generate Images",
+
+    type="primary",
+
+    use_container_width=True,
+):
+
+    if not uploaded_files:
+
+        st.error(
+            "Please upload at least one product image first."
+        )
+
+        st.stop()
+
+
+    if not os.getenv(
+        "OPENAI_API_KEY"
+    ):
+
+        st.error(
+            "OPENAI_API_KEY is not configured."
+        )
+
+        st.stop()
+
+
+    try:
+
+        image_prompt = build_image_prompt(
+
+            profile,
+
+            image_mode,
+        )
+
+
+        source_image = uploaded_files[0]
+
+
+        with st.spinner(
+            "🎨 Creating your Etsy product image..."
+        ):
+
+            generated_images = generate_images(
+
+                image_bytes=
+                    source_image.getvalue(),
+
+                image_prompt=
+                    image_prompt,
+
+                mode=
+                    image_mode,
+
+                mime_type=
+                    source_image.type
+                    or "image/png",
+
+                number_of_images=
+                    number_of_images,
+            )
+
+
+        st.session_state[
+            "generated_images"
+        ] = generated_images
+
+
+        st.session_state[
+            "generated_image_mode"
+        ] = image_mode
+
+
+        st.success(
+
+            f"🎉 Generated "
+            f"{len(generated_images)} image(s)!"
+        )
+
+
+    except Exception as error:
+
+        st.error(
+            f"Image generation failed: {error}"
+        )
+
+
+# =========================================================
+# DISPLAY GENERATED IMAGES
+# =========================================================
+
+generated_images = st.session_state.get(
+    "generated_images"
+)
+
+
+if generated_images:
+
+    st.divider()
+
+    st.header(
+        "🖼 Generated Images"
+    )
+
+
+    image_columns = st.columns(
+
+        min(
+            4,
+            len(generated_images),
+        )
+    )
+
+
+    for index, image_bytes in enumerate(
+        generated_images
+    ):
+
+        with image_columns[
+            index % len(image_columns)
+        ]:
+
+            st.image(
+
+                image_bytes,
+
+                caption=
+                    f"{image_mode} #{index + 1}",
+
+                use_container_width=True,
+            )
+
+
+            st.download_button(
+
+                "⬇️ Download",
+
+                data=
+                    image_bytes,
+
+                file_name=(
+
+                    "etsy_"
+                    +
+                    image_mode.lower().replace(
+                        " ",
+                        "_",
+                    )
+                    +
+                    f"_{index + 1}.png"
+                ),
+
+                mime=
+                    "image/png",
+
+                key=
+                    f"download_image_{index}",
+            )
+
+
+# =========================================================
+# FOOTER
+# =========================================================
+
+st.divider()
+
+st.caption(
+    "Etsy AI — Product Analysis • Etsy SEO • "
+    "Image Studio • AI Product Photography"
+)
