@@ -1,10 +1,12 @@
 import streamlit as st
 from openai import OpenAI
-from image_studio import from image_generator import generate_images (
+from image_studio import (
     ProductProfile,
     build_image_prompt,
     get_scene_options,
 )
+
+from image_generator import generate_images
 import base64
 import json
 import os
