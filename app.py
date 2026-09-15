@@ -1,3 +1,10 @@
+import streamlit as st
+from openai import OpenAI
+from image_studio import (
+    ProductProfile,
+    build_image_prompt,
+    get_scene_options,
+)
 import base64
 import json
 import os
@@ -657,3 +664,129 @@ if result:
         "lifestyle scenes, model-wearing images, "
         "and product-only Etsy hero images."
     )
+# =========================================================
+# V2 - AI IMAGE STUDIO
+# =========================================================
+
+st.divider()
+
+st.header("🖼️ AI Image Studio")
+
+st.write(
+    "Create professional image-generation prompts while "
+    "preserving the original jewelry design."
+)
+
+
+image_mode = st.selectbox(
+    "Choose Image Mode",
+    get_scene_options(),
+)
+
+
+st.subheader("🎨 Scene Settings")
+
+scene_col1, scene_col2 = st.columns(2)
+
+
+with scene_col1:
+
+    st.write("**Selected Mode**")
+
+    st.info(image_mode)
+
+
+with scene_col2:
+
+    st.write("**Recommended Style**")
+
+    st.write(
+        "Automatically selected according to "
+        "the product's material, gemstone, and style."
+    )
+
+
+if st.button(
+    "✨ Generate Image Prompt",
+    type="primary",
+    use_container_width=True,
+):
+
+    profile = ProductProfile(
+
+        jewelry_type=analysis.get(
+            "jewelry_type",
+            product_name,
+        ),
+
+        material=(
+            material
+            or ", ".join(
+                analysis.get(
+                    "materials",
+                    []
+                )
+            )
+        ),
+
+        gemstone=(
+            gemstone
+            or analysis.get(
+                "gemstone",
+                ""
+            )
+        ),
+
+        dimensions=dimensions,
+
+        style=(
+            style
+            or analysis.get(
+                "style",
+                ""
+            )
+        ),
+
+        extra_facts=extra_facts,
+    )
+
+
+    try:
+
+        image_prompt = build_image_prompt(
+            profile,
+            image_mode,
+        )
+
+
+        st.success(
+            "🎉 Image prompt generated!"
+        )
+
+
+        st.subheader(
+            "📋 Image Generation Prompt"
+        )
+
+
+        st.text_area(
+            "Copy this prompt into your image-generation workflow",
+            image_prompt,
+            height=700,
+            key="image_prompt_output",
+        )
+
+
+        st.download_button(
+            "⬇️ Download Prompt",
+            image_prompt,
+            file_name="etsy_image_prompt.txt",
+            mime="text/plain",
+        )
+
+
+    except Exception as error:
+
+        st.error(
+            f"Image prompt generation failed: {error}"
+        )
