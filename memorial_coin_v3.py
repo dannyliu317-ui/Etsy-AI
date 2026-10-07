@@ -289,6 +289,22 @@ def make_memorial_coin_depth(image_bytes: bytes, cfg: MemorialCoinConfig) -> np.
         cfg.text_mode,
     )
 
+    # V6 surface refinement: conservative smoothing before final mask.
+    depth = apply_v6_surface_refinement(depth, cfg)
+
+    # V6 production-safe zone: keep the portrait away from critical edges/hole.
+    safe_zone = build_v6_safe_zone_mask(
+        rcfg.resolution,
+        rcfg.shape,
+        cfg.safety_margin_mm,
+        rcfg.width_mm,
+        rcfg.height_mm,
+        rcfg.hole_diameter_mm,
+        rcfg.hole_offset_mm,
+    )
+    safe_strength = np.clip(cfg.safe_zone_strength, 0.0, 1.0)
+    depth = depth * (safe_strength * safe_zone + (1.0 - safe_strength) * mask)
+
     # Remove relief from the hanging hole and outside the coin.
     depth *= mask
     return _normalize(depth)
