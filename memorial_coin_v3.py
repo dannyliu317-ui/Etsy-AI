@@ -72,6 +72,13 @@ class MemorialCoinConfig:
     highlight_sculpt_strength: float = 0.38
     relief_depth_curve: float = 0.92
     micro_detail_suppression: float = 0.35
+    # V9.1 portrait jewelry refinement controls.
+    face_plane_compression: float = 0.58
+    eyeglass_protection: float = 0.85
+    nose_lip_separation: float = 0.68
+    hair_strand_preservation: float = 0.62
+    background_zero_strength: float = 0.92
+    portrait_micro_detail: float = 0.38
 
 
 def _face_focus_mask(image: Image.Image, size: int) -> np.ndarray:
@@ -511,6 +518,133 @@ def apply_v9_jewelry_artistic_relief(
 
 
 
+
+# ============================================================
+# V9.1 PORTRAIT JEWELRY REFINEMENT
+# ============================================================
+
+def _v91_face_geometry(image: Image.Image, size: int):
+    """Reuse the conservative face-box geometry from V8."""
+    return _v8_face_geometry(image, size)
+
+
+def _v91_local_contrast(arr: np.ndarray, radius: float) -> np.ndarray:
+    """Return a bounded local-contrast map for sculpt-detail protection."""
+    base = np.clip(arr.astype(np.float32), 0, 1)
+    blur = _v9_blur(base, radius)
+    return np.clip(np.abs(base - blur) * 5.0, 0, 1)
+
+
+def _v91_background_zero_map(image: Image.Image, size: int) -> np.ndarray:
+    """Estimate a background-zero mask, especially for clean white portraits."""
+    rgb = np.asarray(ImageOps.exif_transpose(image).convert("RGB"), dtype=np.float32) / 255.0
+    luminance = np.mean(rgb, axis=2)
+    chroma = np.max(rgb, axis=2) - np.min(rgb, axis=2)
+    white = np.clip((luminance - 0.90) / 0.10, 0, 1) * np.clip(1.0 - chroma / 0.18, 0, 1)
+    white_img = Image.fromarray((white * 255).astype(np.uint8), mode="L").resize(
+        (size, size), Image.Resampling.LANCZOS
+    )
+    white_small = np.asarray(white_img, dtype=np.float32) / 255.0
+    content = _portrait_background_suppression(image, size)
+    background = np.clip(white_small * (1.0 - content), 0, 1)
+    return np.clip(_v9_blur(background, max(0.8, size / 180.0)), 0, 1)
+
+
+def _v91_eyeglass_channel(image: Image.Image, size: int) -> np.ndarray:
+    """Protect visible eyeglass/eye-area transitions using face-box proportions."""
+    geom = _v91_face_geometry(image, size)
+    if geom is None:
+        return np.zeros((size, size), dtype=np.float32)
+    (x0, y0, x1, y1), _, _ = geom
+    fw, fh = max(8.0, x1 - x0), max(8.0, y1 - y0)
+    gray = _v9_luminance(image, size)
+    left = _v8_soft_ellipse(size, x0 + fw * 0.30, y0 + fh * 0.40, fw * 0.23, fh * 0.105)
+    right = _v8_soft_ellipse(size, x0 + fw * 0.70, y0 + fh * 0.40, fw * 0.23, fh * 0.105)
+    bridge = _v8_soft_ellipse(size, x0 + fw * 0.50, y0 + fh * 0.41, fw * 0.13, fh * 0.055)
+    eye_zone = np.clip(np.maximum(np.maximum(left, right), bridge), 0, 1)
+    contrast = _v91_local_contrast(gray, max(0.7, size / 120.0))
+    return np.clip(eye_zone * (0.42 + 0.58 * contrast), 0, 1)
+
+
+def _v91_hair_channel(image: Image.Image, size: int) -> np.ndarray:
+    """Preserve meaningful hair strands while suppressing skin/background noise."""
+    hair = _portrait_hair_map(image, size)
+    gray = _v9_luminance(image, size)
+    local = _v91_local_contrast(gray, max(0.7, size / 110.0))
+    return np.clip(hair * (0.42 + 0.78 * local), 0, 1)
+
+
+def build_v91_refinement_channels(
+    depth: np.ndarray, image: Image.Image, cfg: MemorialCoinConfig
+) -> dict[str, np.ndarray]:
+    """Build V9.1 channels for portrait-specific jewelry refinement."""
+    size = depth.shape[0]
+    geom = _v91_face_geometry(image, size)
+    empty = np.zeros((size, size), dtype=np.float32)
+    if geom is None:
+        return {
+            "face_plane": empty.copy(),
+            "eyeglass_protection": empty.copy(),
+            "nose_lip_separation": empty.copy(),
+            "hair_strand_preservation": empty.copy(),
+            "background_zero": empty.copy(),
+        }
+
+    (x0, y0, x1, y1), _, _ = geom
+    fw, fh = max(8.0, x1 - x0), max(8.0, y1 - y0)
+    face = _v8_soft_ellipse(size, (x0 + x1) / 2, (y0 + y1) / 2, fw * 0.62, fh * 0.74)
+    gray = _v9_luminance(image, size)
+    broad = _v9_blur(gray, max(1.0, size / 48.0))
+    local = _v91_local_contrast(gray, max(1.0, size / 70.0))
+    plane = np.clip(face * (0.35 + 0.65 * broad) * (0.72 + 0.28 * local), 0, 1)
+
+    channels = _v8_feature_channels(image, size)
+    nose = channels["nose_bridge"]
+    lips = channels["lips"]
+    nose_lip = np.clip(nose * 0.62 + lips * 0.82 + np.abs(nose - lips) * 0.38, 0, 1)
+
+    return {
+        "face_plane": plane,
+        "eyeglass_protection": _v91_eyeglass_channel(image, size),
+        "nose_lip_separation": nose_lip,
+        "hair_strand_preservation": _v91_hair_channel(image, size),
+        "background_zero": _v91_background_zero_map(image, size),
+    }
+
+
+def apply_v91_portrait_jewelry_refinement(
+    depth: np.ndarray, image: Image.Image, cfg: MemorialCoinConfig
+) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Apply V9.1 portrait-specific refinements before V6 final smoothing."""
+    channels = build_v91_refinement_channels(depth, image, cfg)
+    plane = channels["face_plane"]
+    compression = np.clip(cfg.face_plane_compression, 0, 1)
+    centered = np.clip((depth - 0.5) * (1.0 - 0.55 * compression) + 0.5, 0, 1)
+    refined = np.clip(
+        depth * (1.0 - plane * compression * 0.42)
+        + centered * plane * compression * 0.42,
+        0, 1
+    )
+
+    glasses = channels["eyeglass_protection"]
+    refined = np.clip(refined + glasses * np.clip(cfg.eyeglass_protection, 0, 1) * 0.12, 0, 1)
+
+    nl = channels["nose_lip_separation"]
+    refined = np.clip(refined + nl * np.clip(cfg.nose_lip_separation, 0, 1) * 0.10, 0, 1)
+
+    hair = channels["hair_strand_preservation"]
+    refined = np.clip(refined + hair * np.clip(cfg.hair_strand_preservation, 0, 1) * 0.10, 0, 1)
+
+    bg = channels["background_zero"]
+    bg_strength = np.clip(cfg.background_zero_strength, 0, 1)
+    refined *= np.clip(1.0 - bg * bg_strength, 0, 1)
+
+    micro = _v91_local_contrast(_v9_luminance(image, refined.shape[0]), max(0.7, refined.shape[0] / 150.0))
+    detail_mix = np.clip(cfg.portrait_micro_detail, 0, 1)
+    refined = np.clip(refined + micro * detail_mix * 0.035, 0, 1)
+    return np.clip(refined, 0, 1), channels
+
+
 def make_memorial_coin_depth(image_bytes: bytes, cfg: MemorialCoinConfig) -> np.ndarray:
     image = Image.open(io.BytesIO(image_bytes))
     rcfg = cfg.relief
@@ -587,6 +721,7 @@ def make_memorial_coin_depth(image_bytes: bytes, cfg: MemorialCoinConfig) -> np.
     # V8 jewelry sculpting: contour and individual facial-structure channels.
     depth, _v8_channels = apply_v8_jewelry_sculpt(depth, image, cfg)
     depth, _v9_channels = apply_v9_jewelry_artistic_relief(depth, image, cfg)
+    depth, _v91_channels = apply_v91_portrait_jewelry_refinement(depth, image, cfg)
 
     # V6 surface refinement: conservative smoothing before final mask.
     depth = apply_v6_surface_refinement(depth, cfg)
@@ -980,6 +1115,70 @@ def validate_v8_production(cfg: MemorialCoinConfig, image: Image.Image | None = 
             "V8 adds conservative image-space facial sculpt channels. "
             "They are proportional shaping guides rather than biometric landmarks "
             "or CAD-native anatomy. Confirm final geometry with the manufacturer."
+        ),
+    })
+    return report
+
+
+
+# ============================================================
+# V9.1 PORTRAIT JEWELRY REFINEMENT / PRODUCTION REVIEW
+# ============================================================
+
+def validate_v91_production(cfg: MemorialCoinConfig, image: Image.Image | None = None,
+                            inspection: dict | None = None, production: dict | None = None) -> dict:
+    """Extend V9 review with portrait-specific refinement checks."""
+    report = validate_v9_production(cfg, image, inspection, production)
+    checks = report["checks"]
+
+    def add(name, passed, message, severity="warning"):
+        checks.append({"name": name, "passed": bool(passed), "severity": severity, "message": message})
+
+    if image is not None:
+        channels = build_v91_refinement_channels(
+            np.zeros((cfg.relief.resolution, cfg.relief.resolution), dtype=np.float32),
+            image, cfg
+        )
+        names = {
+            "face_plane": "Face plane refinement",
+            "eyeglass_protection": "Eyeglass protection",
+            "nose_lip_separation": "Nose / lip separation",
+            "hair_strand_preservation": "Hair strand preservation",
+            "background_zero": "Background zero",
+        }
+        for key, label in names.items():
+            coverage = float(channels[key].mean())
+            add(label, coverage > 0.0005, f"{label} channel coverage: {coverage:.4f}.")
+
+    add("V9.1 face plane compression", 0.10 <= cfg.face_plane_compression <= 0.90,
+        f"Face plane compression: {cfg.face_plane_compression:.2f}.")
+    add("V9.1 eyeglass protection", 0.20 <= cfg.eyeglass_protection <= 1.0,
+        f"Eyeglass protection: {cfg.eyeglass_protection:.2f}.")
+    add("V9.1 nose / lip separation", 0.10 <= cfg.nose_lip_separation <= 0.95,
+        f"Nose / lip separation: {cfg.nose_lip_separation:.2f}.")
+    add("V9.1 hair preservation", 0.10 <= cfg.hair_strand_preservation <= 0.95,
+        f"Hair strand preservation: {cfg.hair_strand_preservation:.2f}.")
+    add("V9.1 background zero", 0.50 <= cfg.background_zero_strength <= 1.0,
+        f"Background-zero strength: {cfg.background_zero_strength:.2f}.")
+    add("V9.1 portrait micro detail", 0.05 <= cfg.portrait_micro_detail <= 0.75,
+        f"Portrait micro-detail: {cfg.portrait_micro_detail:.2f}.")
+
+    failed = [c for c in checks if not c["passed"] and c["severity"] == "error"]
+    warning_count = sum(1 for c in checks if c["severity"] == "warning" and not c["passed"])
+    report.update({
+        "version": "V9.1",
+        "status": "PASS" if not failed else "NEEDS REVIEW",
+        "production_ready": not failed,
+        "failed_checks": len(failed),
+        "warning_count": warning_count,
+        "v91_features": [
+            "face-plane compression", "eyeglass protection", "nose / lip separation",
+            "hair-strand preservation", "white-background zeroing", "portrait micro-detail control",
+        ],
+        "guideline": (
+            "V9.1 is a portrait-specific image-space jewelry-relief refinement. "
+            "It is not biometric landmark detection or a physically based metal renderer. "
+            "Confirm final geometry and manufacturing tolerances with the actual production shop."
         ),
     })
     return report
