@@ -1115,3 +1115,66 @@ def validate_v9_production(cfg: MemorialCoinConfig, image: Image.Image | None = 
         ),
     })
     return report
+
+
+# ============================================================
+# V9 JEWELRY RELIEF ART / PRODUCTION REVIEW
+# ============================================================
+
+def validate_v9_production(cfg: MemorialCoinConfig, image: Image.Image | None = None,
+                           inspection: dict | None = None, production: dict | None = None) -> dict:
+    """Extend V8 review with jewelry-artistic relief checks."""
+    report = validate_v8_production(cfg, image, inspection, production)
+    checks = report["checks"]
+
+    def add(name, passed, message, severity="warning"):
+        checks.append({"name": name, "passed": bool(passed), "severity": severity, "message": message})
+
+    style = V9_METAL_STYLES.get(cfg.metal_style, V9_METAL_STYLES["Sterling Silver"])
+    if image is not None:
+        lum = _v9_luminance(image, cfg.relief.resolution)
+        broad = _v9_blur(lum, max(1.0, cfg.relief.resolution / 55.0))
+        gy, gx = np.gradient(broad.astype(np.float32))
+        edge_mean = float(_normalize(np.sqrt(gx * gx + gy * gy)).mean())
+        add("V9 edge crest range", cfg.edge_crest_strength <= 0.75,
+            f"Edge crest strength: {cfg.edge_crest_strength:.2f}; keep <= 0.75 for conservative jewelry relief.")
+        add("V9 highlight sculpt range", cfg.highlight_sculpt_strength <= 0.75,
+            f"Highlight sculpt strength: {cfg.highlight_sculpt_strength:.2f}; keep <= 0.75.")
+        add("V9 micro-detail suppression", 0.10 <= cfg.micro_detail_suppression <= 0.80,
+            f"Micro-detail suppression: {cfg.micro_detail_suppression:.2f}; recommended 0.10–0.80.")
+        add("V9 edge signal", edge_mean >= 0.001, f"Broad edge signal available: {edge_mean:.4f}.")
+    else:
+        add("V9 artistic preview", True, "Source image not supplied; geometry-only V9 review performed.")
+
+    add("V9 relief art strength", 0.20 <= cfg.relief_art_strength <= 0.95,
+        f"Relief art strength: {cfg.relief_art_strength:.2f}; recommended 0.20–0.95.")
+    add("V9 tone compression", 0.15 <= cfg.tone_compression <= 0.90,
+        f"Tone compression: {cfg.tone_compression:.2f}; recommended 0.15–0.90.")
+    add("V9 depth curve", 0.55 <= cfg.relief_depth_curve <= 1.45,
+        f"Relief depth curve: {cfg.relief_depth_curve:.2f}; supported range 0.55–1.45.")
+    add("V9 metal style", cfg.metal_style in V9_METAL_STYLES,
+        f"Selected jewelry style: {cfg.metal_style}.")
+
+    failed = [c for c in checks if not c["passed"] and c["severity"] == "error"]
+    warning_count = sum(1 for c in checks if c["severity"] == "warning" and not c["passed"])
+    report.update({
+        "version": "V9",
+        "status": "PASS" if not failed else "NEEDS REVIEW",
+        "production_ready": not failed,
+        "failed_checks": len(failed),
+        "warning_count": warning_count,
+        "v9_features": [
+            "metal-style relief shaping", "tone compression", "controlled edge crest",
+            "highlight sculpt bias", "relief depth curve", "micro-detail suppression",
+        ],
+        "metal_style": cfg.metal_style,
+        "metal_style_defaults": style,
+        "guideline": (
+            "V9 is an artistic jewelry-relief heightmap engine. It approximates "
+            "metallic relief behavior through controlled height operations; it does "
+            "not perform physically based metal rendering. Confirm final geometry "
+            "and manufacturing tolerances with the actual production shop."
+        ),
+    })
+    return report
+
