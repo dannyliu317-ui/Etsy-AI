@@ -41,6 +41,10 @@ class MemorialCoinConfig:
     text_mode: str = "Raised"
     text_position: str = "Bottom"
     text_size: float = 0.16
+    feature_protection: float = 0.72
+    hair_preservation: float = 0.45
+    background_flatten: float = 0.78
+    edge_softness: float = 0.18
 
 
 def _face_focus_mask(image: Image.Image, size: int) -> np.ndarray:
@@ -145,6 +149,70 @@ def _add_text_height(
     return depth
 
 
+def _portrait_feature_map(image: Image.Image, size: int) -> np.ndarray:
+    """Create a conservative face-feature importance map.
+
+    Uses optional OpenCV landmarks when available; otherwise returns a
+    smooth face-centered map. This is intentionally a shaping aid, not
+    biometric identification.
+    """
+    try:
+        import cv2
+    except ImportError:
+        return np.zeros((size, size), dtype=np.float32)
+
+    rgb = np.asarray(ImageOps.exif_transpose(image).convert("RGB"))
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    cascade = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    detector = cv2.CascadeClassifier(cascade)
+    faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
+    if len(faces) == 0:
+        return np.zeros((size, size), dtype=np.float32)
+
+    x, y, w, h = max(faces, key=lambda f: int(f[2] * f[3]))
+    sx, sy = size / rgb.shape[1], size / rgb.shape[0]
+    x0, y0, x1, y1 = x * sx, y * sy, (x + w) * sx, (y + h) * sy
+    yy, xx = np.mgrid[0:size, 0:size]
+
+    # Approximate eyes / nose / mouth zones from the face box.
+    centers = [
+        (x0 + 0.30 * (x1 - x0), y0 + 0.38 * (y1 - y0), 0.13),
+        (x0 + 0.70 * (x1 - x0), y0 + 0.38 * (y1 - y0), 0.13),
+        (x0 + 0.50 * (x1 - x0), y0 + 0.56 * (y1 - y0), 0.14),
+        (x0 + 0.50 * (x1 - x0), y0 + 0.73 * (y1 - y0), 0.18),
+    ]
+    feature = np.zeros((size, size), dtype=np.float32)
+    fw, fh = max(8.0, x1 - x0), max(8.0, y1 - y0)
+    for cx, cy, radius in centers:
+        rx, ry = fw * radius, fh * radius * 0.75
+        feature = np.maximum(feature, np.exp(-(((xx-cx)/rx)**2 + ((yy-cy)/ry)**2)).astype(np.float32))
+    return np.clip(feature, 0, 1)
+
+
+def _portrait_hair_map(image: Image.Image, size: int) -> np.ndarray:
+    """Estimate outer hair/silhouette importance from face box geometry."""
+    try:
+        import cv2
+    except ImportError:
+        return np.zeros((size, size), dtype=np.float32)
+
+    rgb = np.asarray(ImageOps.exif_transpose(image).convert("RGB"))
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    detector = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
+    if len(faces) == 0:
+        return np.zeros((size, size), dtype=np.float32)
+
+    x, y, w, h = max(faces, key=lambda f: int(f[2] * f[3]))
+    sx, sy = size / rgb.shape[1], size / rgb.shape[0]
+    cx, cy = (x + w/2) * sx, (y + h/2) * sy
+    rx, ry = w * sx * 0.82, h * sy * 1.15
+    yy, xx = np.mgrid[0:size, 0:size]
+    ellipse = np.exp(-(((xx-cx)/max(1,rx))**2 + ((yy-(cy-0.12*h*sy))/max(1,ry))**2)).astype(np.float32)
+    face = _face_focus_mask(image, size)
+    return np.clip(ellipse * (1.0 - 0.65 * face), 0, 1)
+
+
 def make_memorial_coin_depth(image_bytes: bytes, cfg: MemorialCoinConfig) -> np.ndarray:
     image = Image.open(io.BytesIO(image_bytes))
     rcfg = cfg.relief
@@ -164,6 +232,20 @@ def make_memorial_coin_depth(image_bytes: bytes, cfg: MemorialCoinConfig) -> np.
 
     if cfg.face_focus:
         depth = np.power(np.clip(depth, 0, 1), 1.0 / max(0.65, cfg.face_boost))
+        features = _portrait_feature_map(image, rcfg.resolution)
+        if features.max() > 0:
+            # Protect eye/nose/mouth transitions from excessive smoothing.
+            protected = np.clip(depth + features * cfg.feature_protection * 0.22, 0, 1)
+            depth = np.maximum(depth, protected)
+
+        hair = _portrait_hair_map(image, rcfg.resolution)
+        if hair.max() > 0:
+            depth = np.clip(depth + hair * cfg.hair_preservation * 0.10, 0, 1)
+
+    # Explicit background flattening keeps the portrait from becoming a noisy
+    # full-frame terrain map while preserving a small silhouette cue.
+    background_factor = np.clip(1.0 - cfg.background_flatten, 0.05, 1.0)
+    depth = depth * (background_factor + (1.0 - background_factor) * focus)
 
     if cfg.coin_style == "Deep Relief":
         depth = np.power(np.clip(depth, 0, 1), 0.78)
@@ -189,7 +271,8 @@ def make_memorial_coin_depth(image_bytes: bytes, cfg: MemorialCoinConfig) -> np.
     # Raised perimeter and inner ring.
     border = outer & ~inner
     ring = inner & ~inner2
-    border_strength = min(0.45, max(0.03, cfg.border_height_mm / max(0.1, rcfg.relief_height_mm)))\n    ring_strength = border_strength * 0.55\n    depth = np.clip(depth + border.astype(np.float32) * border_strength + ring.astype(np.float32) * ring_strength, 0, 1)
+    border_strength = min(0.45, max(0.03, cfg.border_height_mm / max(0.1, rcfg.relief_height_mm)))
+    ring_strength = border_strength * 0.55\n    depth = np.clip(depth + border.astype(np.float32) * border_strength + ring.astype(np.float32) * ring_strength, 0, 1)
 
     depth = _add_text_height(
         depth,
@@ -217,7 +300,7 @@ def generate_memorial_coin_stl(image_bytes: bytes, cfg: MemorialCoinConfig) -> b
     )
     # Keep the edge crisp enough for casting/printing.
     depth_img = Image.fromarray((depth * 255).astype(np.uint8))
-    depth_img = depth_img.filter(ImageFilter.GaussianBlur(0.35))
+    depth_img = depth_img.filter(ImageFilter.GaussianBlur(max(0.05, cfg.edge_softness)))
     depth = np.asarray(depth_img, dtype=np.float32) / 255.0
     mesh = _mesh_from_heightmap(depth, mask, rcfg)
     mesh.apply_translation(-mesh.centroid)
