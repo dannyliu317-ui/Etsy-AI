@@ -685,6 +685,8 @@ if relief_file:
         build_v7_portrait_layers,
         validate_v8_production,
         build_v8_sculpt_channels,
+        validate_v9_production,
+        build_v9_artistic_channels,
     )
 
     col1, col2, col3 = st.columns(3)
@@ -819,6 +821,29 @@ if relief_file:
         chin_strength = st.slider("Chin", 0.0, 1.0, 0.48, 0.05, key="v8_chin")
         sculpt_detail_mix = st.slider("Sculpt Detail Mix", 0.0, 1.0, 0.64, 0.05, key="v8_detail_mix")
 
+
+    st.subheader("✨ V9 Jewelry Relief Art Engine")
+    st.caption(
+        "V9 converts V8 portrait structure into jewelry-oriented relief using tone compression, "
+        "controlled edge crests, highlight bias, depth shaping, and metal-style presets."
+    )
+    v9_col1, v9_col2, v9_col3 = st.columns(3)
+    with v9_col1:
+        metal_style = st.selectbox(
+            "Metal / Relief Style",
+            ["Sterling Silver", "Yellow Gold", "Antique / Oxidized", "Soft Polished", "Deep Engraved"],
+            key="v9_metal_style",
+        )
+        relief_art_strength = st.slider("Relief Art Strength", 0.0, 1.0, 0.68, 0.05, key="v9_art_strength")
+        tone_compression = st.slider("Tone Compression", 0.0, 1.0, 0.62, 0.05, key="v9_tone_compression")
+    with v9_col2:
+        edge_crest_strength = st.slider("Edge Crest", 0.0, 1.0, 0.42, 0.05, key="v9_edge_crest")
+        highlight_sculpt_strength = st.slider("Highlight Sculpt", 0.0, 1.0, 0.38, 0.05, key="v9_highlight")
+        relief_depth_curve = st.slider("Relief Depth Curve", 0.55, 1.45, 0.92, 0.05, key="v9_depth_curve")
+    with v9_col3:
+        micro_detail_suppression = st.slider("Micro-detail Suppression", 0.0, 1.0, 0.35, 0.05, key="v9_micro_suppression")
+        st.info("V9 is an image-space artistic relief engine; it does not perform physically based metal rendering.")
+
     st.subheader("🛡️ V6 Production Refinement")
     v6_col1, v6_col2, v6_col3 = st.columns(3)
     with v6_col1:
@@ -900,9 +925,16 @@ if relief_file:
         lip_strength=lip_strength,
         chin_strength=chin_strength,
         sculpt_detail_mix=sculpt_detail_mix,
+        metal_style=metal_style,
+        relief_art_strength=relief_art_strength,
+        tone_compression=tone_compression,
+        edge_crest_strength=edge_crest_strength,
+        highlight_sculpt_strength=highlight_sculpt_strength,
+        relief_depth_curve=relief_depth_curve,
+        micro_detail_suppression=micro_detail_suppression,
     )
 
-    if st.button("🔎 Preview V5 Portrait Coin", use_container_width=True, key="v3_preview"):
+    if st.button("🔎 Preview V9 Jewelry Portrait Coin", use_container_width=True, key="v3_preview"):
         try:
             with st.spinner("Analyzing portrait and building coin relief preview..."):
                 preview = preview_memorial_coin(relief_file.getvalue(), cfg)
@@ -921,6 +953,21 @@ if relief_file:
                 for idx, (channel_key, label) in enumerate(channel_labels):
                     with channel_cols[idx]:
                         channel_img = (np.clip(v8_channels[channel_key], 0, 1) * 255).astype(np.uint8)
+                        st.image(channel_img, caption=label, use_container_width=True)
+
+            with st.expander("✨ V9 Jewelry Relief Art Channels"):
+                source_image = Image.open(io.BytesIO(relief_file.getvalue()))
+                v9_base = make_memorial_coin_depth(relief_file.getvalue(), cfg)
+                v9_channels = build_v9_artistic_channels(v9_base, source_image, cfg)
+                channel_cols = st.columns(4)
+                for idx, (channel_key, label) in enumerate([
+                    ("tone_compressed", "Tone Compressed"),
+                    ("edge_crest", "Edge Crest"),
+                    ("highlight_bias", "Highlight Bias"),
+                    ("micro_detail_keep", "Micro Detail Keep"),
+                ]):
+                    with channel_cols[idx]:
+                        channel_img = (np.clip(v9_channels[channel_key], 0, 1) * 255).astype(np.uint8)
                         st.image(channel_img, caption=label, use_container_width=True)
 
             with st.expander("🔬 V7 Portrait Sculpt Layers"):
@@ -942,7 +989,7 @@ if relief_file:
             st.error(f"V5 preview failed: {error}")
 
     if st.button(
-        "🪙 Generate V5 Memorial Coin STL",
+        "🪙 Generate V9 Memorial Coin STL",
         type="primary",
         use_container_width=True,
         key="v3_generate_stl",
@@ -954,16 +1001,16 @@ if relief_file:
             st.session_state["v4_stl"] = stl_bytes
             st.session_state["v4_inspection"] = inspection
             source_image = Image.open(io.BytesIO(relief_file.getvalue()))
-            st.session_state["v5_production_report"] = validate_v8_production(
+            st.session_state["v5_production_report"] = validate_v9_production(
                 cfg, source_image, inspection, production_preset
             )
-            st.success("V8 memorial portrait coin STL generated and checked.")
+            st.success("V9 jewelry portrait coin STL generated and checked.")
         except Exception as error:
             st.error(f"V5 STL generation failed: {error}")
 
     inspection = st.session_state.get("v4_inspection")
     if inspection:
-        st.subheader("📐 V8 Production Report")
+        st.subheader("📐 V9 Production Report")
         report = st.session_state.get("v5_production_report")
         if report:
             if report.get("production_ready"):
@@ -981,16 +1028,16 @@ if relief_file:
 
     if st.session_state.get("v4_stl"):
         st.download_button(
-            "⬇️ Download V8 STL",
+            "⬇️ Download V9 STL",
             st.session_state["v4_stl"],
-            "jewelry_memorial_portrait_coin_v8.stl",
+            "jewelry_memorial_portrait_coin_v9.stl",
             "model/stl",
             use_container_width=True,
             key="v3_download_stl",
         )
 
     st.info(
-        "V7 adds layered portrait sculpting for face structure, facial features, hair/silhouette, clothing/shoulders, and background suppression while retaining V6 safe-zone refinement and V5 process presets. V4 uses optional OpenCV face localization when available. Face feature protection, hair/silhouette preservation, and background flattening are shaping aids rather than biometric identification. If face detection "
+        "V9 adds jewelry-oriented relief art shaping on top of V8 facial structure while retaining V1–V8 portrait, production-safe-zone, and manufacturing-guideline layers. V4 uses optional OpenCV face localization when available. Face feature protection, hair/silhouette preservation, and background flattening are shaping aids rather than biometric identification. If face detection "
         "is unavailable, it safely falls back to the V2-style depth workflow."
     )
 
