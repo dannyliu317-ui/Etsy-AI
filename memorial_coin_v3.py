@@ -72,14 +72,6 @@ class MemorialCoinConfig:
     highlight_sculpt_strength: float = 0.38
     relief_depth_curve: float = 0.92
     micro_detail_suppression: float = 0.35
-    # V9 jewelry relief artistic engine.
-    metal_style: str = "Sterling Silver"
-    relief_art_strength: float = 0.68
-    tone_compression: float = 0.62
-    edge_crest_strength: float = 0.42
-    highlight_sculpt_strength: float = 0.38
-    relief_depth_curve: float = 0.92
-    micro_detail_suppression: float = 0.35
 
 
 def _face_focus_mask(image: Image.Image, size: int) -> np.ndarray:
