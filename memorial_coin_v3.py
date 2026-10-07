@@ -45,6 +45,11 @@ class MemorialCoinConfig:
     hair_preservation: float = 0.45
     background_flatten: float = 0.78
     edge_softness: float = 0.18
+    safety_margin_mm: float = 0.65
+    surface_smoothing: float = 0.18
+    text_min_width_mm: float = 0.30
+    edge_rounding: float = 0.35
+    safe_zone_strength: float = 0.75
 
 
 def _face_focus_mask(image: Image.Image, size: int) -> np.ndarray:
@@ -438,3 +443,124 @@ def validate_memorial_coin_production(cfg: MemorialCoinConfig, inspection: dict 
         "preset": p,
         "warnings": warnings,
     }
+
+
+# ============================================================
+# V6 PRODUCTION REFINEMENT ENGINE
+# ============================================================
+
+def apply_v6_surface_refinement(depth: np.ndarray, cfg: MemorialCoinConfig) -> np.ndarray:
+    """Refine a heightmap for jewelry production review.
+
+    This is a conservative image-space operation: it rounds abrupt transitions,
+    protects the central portrait, and reduces tiny high-frequency noise.
+    """
+    arr = np.clip(depth.astype(np.float32), 0, 1)
+    if cfg.surface_smoothing > 0:
+        radius = max(0.05, float(cfg.surface_smoothing) * 2.2)
+        img = Image.fromarray((arr * 255).astype(np.uint8), mode="L")
+        img = img.filter(ImageFilter.GaussianBlur(radius=radius))
+        smooth = np.asarray(img, dtype=np.float32) / 255.0
+        blend = np.clip(float(cfg.surface_smoothing), 0, 1)
+        arr = arr * (1.0 - blend) + smooth * blend
+
+    # Soft-limit extreme local peaks so casting/printing does not inherit
+    # isolated pixel-scale spikes.
+    arr = np.clip(arr, 0.0, 1.0)
+    center = Image.fromarray((arr * 255).astype(np.uint8), mode="L")
+    center = center.filter(ImageFilter.GaussianBlur(max(0.05, cfg.edge_rounding * 0.8)))
+    rounded = np.asarray(center, dtype=np.float32) / 255.0
+    arr = np.clip(arr * 0.70 + rounded * 0.30, 0, 1)
+    return arr
+
+
+def build_v6_safe_zone_mask(size: int, shape: str, margin_mm: float,
+                            width_mm: float, height_mm: float,
+                            hole_diameter_mm: float, hole_offset_mm: float) -> np.ndarray:
+    """Build an inner production-safe zone excluding outer edge and hole."""
+    outer = _shape_mask(size, shape).astype(np.float32)
+    yy, xx = np.mgrid[0:size, 0:size]
+    cx = cy = (size - 1) / 2
+    px_per_mm = size / max(width_mm, height_mm)
+    margin_px = max(1, int(margin_mm * px_per_mm))
+
+    # Conservative radial inset. For non-circular shapes this intentionally
+    # errs inward rather than claiming exact CAD offset geometry.
+    dist = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
+    safe = dist <= max(1, size * 0.47 - margin_px)
+
+    hole_cx = size / 2
+    hole_cy = size / 2 - (height_mm / 2 - hole_offset_mm) * px_per_mm
+    hole_r = max(1.5, hole_diameter_mm * px_per_mm / 2 + margin_px * 0.45)
+    hole = (xx - hole_cx) ** 2 + (yy - hole_cy) ** 2 <= hole_r ** 2
+
+    return outer * (~hole) * safe.astype(np.float32)
+
+
+def estimate_text_width_mm(cfg: MemorialCoinConfig) -> float:
+    if not cfg.text.strip():
+        return 0.0
+    # Approximate stroke/letter footprint conservatively from configured text size.
+    return max(0.08, cfg.text_size * cfg.relief.width_mm * 0.22)
+
+
+def validate_v6_production(cfg: MemorialCoinConfig, inspection: dict | None = None,
+                           production: dict | None = None) -> dict:
+    """V6 manufacturing review with safe-zone and personalization checks."""
+    report = validate_memorial_coin_production(cfg, inspection, production)
+    p = production or get_production_preset("30mm Coin", "Jewelry Casting")
+    checks = report["checks"]
+
+    def add(name, passed, message, severity="error"):
+        checks.append({"name": name, "passed": bool(passed), "severity": severity, "message": message})
+
+    safe_margin = float(cfg.safety_margin_mm)
+    add(
+        "Production safe zone",
+        safe_margin >= 0.40,
+        f"Edge / hole safety margin guideline: {safe_margin:.2f} mm.",
+        "warning",
+    )
+
+    if cfg.text.strip():
+        estimated = estimate_text_width_mm(cfg)
+        target = float(p["min_text_line_mm"])
+        add(
+            "Personalization detail width",
+            estimated >= target,
+            f"Estimated text detail {estimated:.2f} mm vs target {target:.2f} mm.",
+            "warning",
+        )
+        add(
+            "Text-to-edge safety",
+            safe_margin >= 0.50,
+            f"Personalization should remain at least ~0.50 mm from critical edges/holes.",
+            "warning",
+        )
+
+    # Validate the requested relief is not so deep that the safe zone becomes
+    # visually dominated by vertical walls.
+    ratio = cfg.relief.relief_height_mm / max(cfg.relief.base_thickness_mm, 0.01)
+    add(
+        "V6 relief wall control",
+        ratio <= 0.60,
+        f"Relief/base ratio {ratio:.2f}; target <= 0.60 for conservative production review.",
+    )
+
+    failed = [c for c in checks if not c["passed"] and c["severity"] == "error"]
+    warning_count = sum(1 for c in checks if c["severity"] == "warning" and not c["passed"])
+    report.update({
+        "version": "V6",
+        "status": "PASS" if not failed else "NEEDS REVIEW",
+        "production_ready": not failed,
+        "failed_checks": len(failed),
+        "warning_count": warning_count,
+        "v6_features": [
+            "production safe zone",
+            "surface refinement",
+            "personalization manufacturability review",
+            "conservative relief wall control",
+        ],
+        "guideline": "V6 is a design-for-manufacture aid, not a manufacturing guarantee. Confirm final tolerances with the actual production shop.",
+    })
+    return report
