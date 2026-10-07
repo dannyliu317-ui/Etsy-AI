@@ -833,7 +833,7 @@ if relief_file:
         background_flatten=background_flatten,
     )
 
-    if st.button("🔎 Preview V4 Portrait Coin", use_container_width=True, key="v3_preview"):
+    if st.button("🔎 Preview V5 Portrait Coin", use_container_width=True, key="v3_preview"):
         try:
             with st.spinner("Analyzing portrait and building coin relief preview..."):
                 preview = preview_memorial_coin(relief_file.getvalue(), cfg)
@@ -842,7 +842,7 @@ if relief_file:
             st.error(f"V5 preview failed: {error}")
 
     if st.button(
-        "🪙 Generate V4 Memorial Coin STL",
+        "🪙 Generate V5 Memorial Coin STL",
         type="primary",
         use_container_width=True,
         key="v3_generate_stl",
@@ -853,18 +853,28 @@ if relief_file:
             inspection = inspect_memorial_coin(stl_bytes)
             st.session_state["v4_stl"] = stl_bytes
             st.session_state["v4_inspection"] = inspection
-            st.success("V4 memorial coin STL generated.")
+            st.session_state["v5_production_report"] = validate_memorial_coin_production(cfg, inspection, production_preset)
+            st.success("V5 memorial coin STL generated and checked.")
         except Exception as error:
             st.error(f"V5 STL generation failed: {error}")
 
     inspection = st.session_state.get("v4_inspection")
     if inspection:
-        st.subheader("📐 Production Check")
-        st.json(inspection)
-        if inspection.get("watertight"):
-            st.success("Mesh reports watertight.")
+        st.subheader("📐 V5 Production Report")
+        report = st.session_state.get("v5_production_report")
+        if report:
+            if report.get("production_ready"):
+                st.success("✅ V5 geometry checks passed — suitable for production review.")
+            else:
+                st.warning("⚠️ V5 needs review before production.")
+            st.metric("Failed Checks", report.get("failed_checks", 0))
+            st.metric("Warnings", report.get("warning_count", 0))
+            for check in report.get("checks", []):
+                icon = "✅" if check["passed"] else ("⚠️" if check["severity"] == "warning" else "❌")
+                st.write(f"{icon} **{check['name']}** — {check['message']}")
+            st.caption(report.get("guideline", ""))
         else:
-            st.error("Mesh is not watertight. Do not send this STL to production yet.")
+            st.json(inspection)
 
     if st.session_state.get("v4_stl"):
         st.download_button(
