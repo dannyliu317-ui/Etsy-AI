@@ -564,12 +564,29 @@ def _v91_background_zero_map(image: Image.Image, size: int) -> np.ndarray:
     luminance = np.mean(rgb, axis=2)
     chroma = np.max(rgb, axis=2) - np.min(rgb, axis=2)
     white = np.clip((luminance - 0.90) / 0.10, 0, 1) * np.clip(1.0 - chroma / 0.18, 0, 1)
-    white_img = Image.fromarray((white * 255).astype(np.uint8), mode="L").resize(
+    # Prefer border-connected white regions over a simple brightness threshold.
+    # This is much safer for studio portraits because white hair/shirts may also
+    # be bright but are not connected to the image border.
+    try:
+        from scipy import ndimage
+        white_binary = white > 0.88
+        labels, count = ndimage.label(white_binary)
+        if count:
+            border_labels = np.unique(np.concatenate([
+                labels[0, :], labels[-1, :], labels[:, 0], labels[:, -1]
+            ]))
+            border_connected = np.isin(labels, border_labels) & (labels > 0)
+        else:
+            border_connected = white_binary
+    except Exception:
+        border_connected = white > 0.92
+
+    white_img = Image.fromarray((border_connected.astype(np.uint8) * 255), mode="L").resize(
         (size, size), Image.Resampling.LANCZOS
     )
     white_small = np.asarray(white_img, dtype=np.float32) / 255.0
     content = _portrait_background_suppression(image, size)
-    background = np.clip(white_small * (1.0 - content), 0, 1)
+    background = np.clip(white_small * (1.0 - content * 0.96), 0, 1)
     return np.clip(_v9_blur(background, max(0.8, size / 180.0)), 0, 1)
 
 
