@@ -12,7 +12,6 @@ feature usable without downloading a large model.
 from __future__ import annotations
 
 import io
-import math
 from dataclasses import dataclass
 from typing import Literal
 
@@ -34,7 +33,11 @@ class ReliefConfig:
     smoothing: float = 0.35
     contrast: float = 1.15
     shape: Shape = "Circle"
-    depth_model: str = "Grayscale"
+    depth_model: str = "AI Depth"
+    relief_mode: str = "Portrait"
+    invert_depth: bool = False
+    depth_gamma: float = 0.85
+    edge_fade: float = 0.08
 
 
 def _normalize(a: np.ndarray) -> np.ndarray:
@@ -105,11 +108,50 @@ def make_depth_map(
     image_bytes: bytes,
     resolution: int = 180,
     mode: str = "Grayscale",
+    invert: bool = False,
+    gamma: float = 1.0,
+    relief_mode: str = "Portrait",
 ) -> np.ndarray:
     image = Image.open(io.BytesIO(image_bytes))
     if mode == "AI Depth":
-        return _ai_depth(image, resolution)
-    return _grayscale_depth(image, resolution)
+        depth = _ai_depth(image, resolution)
+    else:
+        depth = _grayscale_depth(image, resolution)
+
+    if relief_mode == "Portrait":
+        y, x = np.mgrid[0:resolution, 0:resolution]
+        cx = (resolution - 1) / 2
+        cy = (resolution - 1) / 2
+        rx = resolution * 0.48
+        ry = resolution * 0.48
+        subject_weight = np.clip(
+            1.0 - (((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2) * 0.35,
+            0.55,
+            1.0,
+        )
+        depth = depth * subject_weight
+
+    if invert:
+        depth = 1.0 - depth
+
+    gamma = max(0.35, min(2.5, float(gamma)))
+    depth = np.power(np.clip(depth, 0, 1), gamma)
+    return _normalize(depth)
+
+
+def validate_relief_config(cfg: ReliefConfig) -> list[str]:
+    warnings = []
+    if cfg.base_thickness_mm < 1.2:
+        warnings.append("Base thickness is below 1.2 mm; increase it for production.")
+    if cfg.relief_height_mm > cfg.base_thickness_mm * 0.9:
+        warnings.append("Relief height is high relative to the base.")
+    if cfg.hole_diameter_mm < 2.0:
+        warnings.append("Hanging hole is under 2 mm; verify the jump ring.")
+    if cfg.resolution < 160:
+        warnings.append("Low mesh resolution may soften facial details.")
+    if cfg.width_mm < 20:
+        warnings.append("Pendant width is under 20 mm; portrait details may be difficult to reproduce.")
+    return warnings
 
 
 def _shape_mask(size: int, shape: Shape) -> np.ndarray:
@@ -242,6 +284,9 @@ def generate_relief_stl(
         image_bytes,
         resolution=cfg.resolution,
         mode=cfg.depth_model,
+        invert=cfg.invert_depth,
+        gamma=cfg.depth_gamma,
+        relief_mode=cfg.relief_mode,
     )
 
     # Contrast/smoothing tuned for shallow jewelry relief.
@@ -266,7 +311,7 @@ def generate_relief_stl(
     edge_dist = np.minimum.reduce(
         [xx, yy, cfg.resolution - 1 - xx, cfg.resolution - 1 - yy]
     )
-    fade = np.clip(edge_dist / (cfg.resolution * 0.08), 0, 1)
+    fade = np.clip(edge_dist / (cfg.resolution * max(0.02, cfg.edge_fade)), 0, 1)
     depth *= fade
     depth *= mask
 
@@ -278,9 +323,82 @@ def generate_relief_stl(
 
 
 def preview_heightmap(image_bytes: bytes, cfg: ReliefConfig) -> bytes:
-    depth = make_depth_map(image_bytes, cfg.resolution, cfg.depth_model)
+    depth = make_depth_map(
+        image_bytes, cfg.resolution, cfg.depth_model,
+        invert=cfg.invert_depth, gamma=cfg.depth_gamma,
+        relief_mode=cfg.relief_mode,
+    )
     depth = np.clip((depth - 0.5) * cfg.contrast + 0.5, 0, 1)
     img = Image.fromarray((depth * 255).astype(np.uint8), mode="L")
     output = io.BytesIO()
     img.save(output, format="PNG")
     return output.getvalue()
+
+
+def preview_hillshade(image_bytes: bytes, cfg: ReliefConfig) -> bytes:
+    depth = make_depth_map(
+        image_bytes, cfg.resolution, cfg.depth_model,
+        invert=cfg.invert_depth, gamma=cfg.depth_gamma,
+        relief_mode=cfg.relief_mode,
+    )
+    depth = np.clip((depth - 0.5) * cfg.contrast + 0.5, 0, 1)
+    mask = _apply_hole(
+        _shape_mask(cfg.resolution, cfg.shape),
+        cfg.hole_diameter_mm, cfg.hole_offset_mm,
+        cfg.width_mm, cfg.height_mm,
+    )
+    z = depth * cfg.relief_height_mm
+    gy, gx = np.gradient(z)
+    nx, ny, nz = -gx, -gy, np.ones_like(z)
+    norm = np.sqrt(nx * nx + ny * ny + nz * nz) + 1e-8
+    nx, ny, nz = nx / norm, ny / norm, nz / norm
+    light = np.clip(nx * -0.45 + ny * -0.55 + nz * 0.72, 0, 1)
+    shaded = (0.25 + 0.75 * light) * mask
+    img = Image.fromarray((shaded * 255).astype(np.uint8), mode="L")
+    output = io.BytesIO()
+    img.save(output, format="PNG")
+    return output.getvalue()
+
+
+def export_relief_glb(image_bytes: bytes, cfg: ReliefConfig) -> bytes:
+    try:
+        import trimesh
+    except ImportError as exc:
+        raise RuntimeError("3D preview requires the 'trimesh' package.") from exc
+    depth = make_depth_map(
+        image_bytes, cfg.resolution, cfg.depth_model,
+        invert=cfg.invert_depth, gamma=cfg.depth_gamma,
+        relief_mode=cfg.relief_mode,
+    )
+    depth = np.clip((depth - 0.5) * cfg.contrast + 0.5, 0, 1)
+    depth_img = Image.fromarray((depth * 255).astype(np.uint8))
+    if cfg.smoothing > 0:
+        depth_img = depth_img.filter(
+            ImageFilter.GaussianBlur(max(0.1, cfg.smoothing * 1.8))
+        )
+    depth = np.asarray(depth_img, dtype=np.float32) / 255.0
+    mask = _apply_hole(
+        _shape_mask(cfg.resolution, cfg.shape),
+        cfg.hole_diameter_mm, cfg.hole_offset_mm,
+        cfg.width_mm, cfg.height_mm,
+    )
+    mesh = _mesh_from_heightmap(depth * 0.98, mask, cfg)
+    mesh.apply_translation(-mesh.centroid)
+    return mesh.export(file_type="glb")
+
+
+def inspect_stl(stl_bytes: bytes) -> dict:
+    try:
+        import trimesh
+    except ImportError as exc:
+        raise RuntimeError("STL inspection requires the 'trimesh' package.") from exc
+    mesh = trimesh.load(io.BytesIO(stl_bytes), file_type="stl")
+    return {
+        "watertight": bool(mesh.is_watertight),
+        "vertices": int(len(mesh.vertices)),
+        "triangles": int(len(mesh.faces)),
+        "size_x_mm": round(float(mesh.extents[0]), 2),
+        "size_y_mm": round(float(mesh.extents[1]), 2),
+        "size_z_mm": round(float(mesh.extents[2]), 2),
+        "volume_mm3": round(float(abs(mesh.volume)), 2),
+    }
