@@ -689,6 +689,7 @@ if relief_file:
         build_v9_artistic_channels,
         validate_v91_production,
         build_v91_refinement_channels,
+        validate_v10_production,
     )
 
     col1, col2, col3 = st.columns(3)
@@ -864,6 +865,30 @@ if relief_file:
         background_zero_strength = st.slider("Background Zero", 0.0, 1.0, 0.92, 0.05, key="v91_bg_zero")
         portrait_micro_detail = st.slider("Portrait Micro Detail", 0.0, 1.0, 0.38, 0.05, key="v91_micro")
 
+    st.subheader("🏭 V10 Jewelry Production Engine")
+    st.caption(
+        "V10 converts the V9.1 portrait relief into a process-aware production curve. "
+        "Choose the intended jewelry process and relief profile; these are design guidelines, not manufacturing guarantees."
+    )
+    v10_col1, v10_col2, v10_col3 = st.columns(3)
+    with v10_col1:
+        production_process = st.selectbox(
+            "Production Process",
+            ["Jewelry Casting", "Resin / 3D Print", "CNC / Engraving"],
+            key="v10_process",
+        )
+        production_profile = st.selectbox(
+            "Relief Profile",
+            ["Balanced Portrait", "High Relief Portrait", "Fine Detail Pendant", "Soft Memorial Coin"],
+            key="v10_profile",
+        )
+    with v10_col2:
+        v10_surface_flatten = st.slider("Surface Flattening", 0.0, 0.70, 0.34, 0.05, key="v10_flatten")
+        v10_peak_limit = st.slider("Peak Limit", 0.55, 1.0, 0.88, 0.05, key="v10_peak")
+    with v10_col3:
+        v10_detail_floor = st.slider("Detail Protection", 0.0, 0.50, 0.16, 0.02, key="v10_detail")
+        v10_edge_fade = st.slider("Edge Fade", 0.04, 0.30, 0.10, 0.02, key="v10_edge")
+
     st.subheader("🛡️ V6 Production Refinement")
     v6_col1, v6_col2, v6_col3 = st.columns(3)
     with v6_col1:
@@ -958,9 +983,15 @@ if relief_file:
         hair_strand_preservation=hair_strand_preservation,
         background_zero_strength=background_zero_strength,
         portrait_micro_detail=portrait_micro_detail,
+        production_process=production_process,
+        production_profile=production_profile,
+        v10_surface_flatten=v10_surface_flatten,
+        v10_peak_limit=v10_peak_limit,
+        v10_detail_floor=v10_detail_floor,
+        v10_edge_fade=v10_edge_fade,
     )
 
-    if st.button("🔎 Preview V9.1 Jewelry Portrait Coin", use_container_width=True, key="v3_preview"):
+    if st.button("🔎 Preview V10 Jewelry Portrait Coin", use_container_width=True, key="v3_preview"):
         try:
             with st.spinner("Analyzing portrait and building coin relief preview..."):
                 preview = preview_memorial_coin(relief_file.getvalue(), cfg)
@@ -1043,7 +1074,7 @@ if relief_file:
             st.session_state["v4_stl"] = stl_bytes
             st.session_state["v4_inspection"] = inspection
             source_image = Image.open(io.BytesIO(relief_file.getvalue()))
-            st.session_state["v5_production_report"] = validate_v91_production(
+            st.session_state["v5_production_report"] = validate_v10_production(
                 cfg, source_image, inspection, production_preset
             )
             st.success("V9.1 jewelry portrait coin STL generated and checked.")
@@ -1052,7 +1083,7 @@ if relief_file:
 
     inspection = st.session_state.get("v4_inspection")
     if inspection:
-        st.subheader("📐 V9.1 Production Report")
+        st.subheader("📐 V10 Production Report")
         report = st.session_state.get("v5_production_report")
         if report:
             if report.get("production_ready"):
@@ -1070,9 +1101,9 @@ if relief_file:
 
     if st.session_state.get("v4_stl"):
         st.download_button(
-            "⬇️ Download V9.1 STL",
+            "⬇️ Download V10 STL",
             st.session_state["v4_stl"],
-            "jewelry_memorial_portrait_coin_v9_1.stl",
+            "jewelry_memorial_portrait_coin_v10.stl",
             "model/stl",
             use_container_width=True,
             key="v3_download_stl",
