@@ -72,6 +72,14 @@ class MemorialCoinConfig:
     highlight_sculpt_strength: float = 0.38
     relief_depth_curve: float = 0.92
     micro_detail_suppression: float = 0.35
+    # V9 jewelry relief artistic engine.
+    metal_style: str = "Sterling Silver"
+    relief_art_strength: float = 0.68
+    tone_compression: float = 0.62
+    edge_crest_strength: float = 0.42
+    highlight_sculpt_strength: float = 0.38
+    relief_depth_curve: float = 0.92
+    micro_detail_suppression: float = 0.35
 
 
 def _face_focus_mask(image: Image.Image, size: int) -> np.ndarray:
@@ -508,6 +516,70 @@ def apply_v9_jewelry_artistic_relief(
     final = np.clip(depth * (1.0 - art_strength) + artistic * art_strength, 0, 1)
     return final, channels
 
+
+
+# ============================================================
+# V9 JEWELRY RELIEF ARTISTIC ENGINE
+# ============================================================
+
+V9_METAL_STYLES = {
+    "Sterling Silver": {"tone": 0.62, "edge": 0.42, "highlight": 0.38, "micro": 0.35},
+    "Yellow Gold": {"tone": 0.56, "edge": 0.36, "highlight": 0.46, "micro": 0.28},
+    "Antique / Oxidized": {"tone": 0.72, "edge": 0.52, "highlight": 0.30, "micro": 0.48},
+    "Soft Polished": {"tone": 0.48, "edge": 0.30, "highlight": 0.52, "micro": 0.22},
+    "Deep Engraved": {"tone": 0.76, "edge": 0.62, "highlight": 0.26, "micro": 0.55},
+}
+
+def _v9_luminance(image: Image.Image, size: int) -> np.ndarray:
+    source = ImageOps.exif_transpose(image).convert("L")
+    source.thumbnail((size, size), Image.Resampling.LANCZOS)
+    canvas = Image.new("L", (size, size), 0)
+    canvas.paste(source, ((size - source.width) // 2, (size - source.height) // 2))
+    return np.asarray(canvas, dtype=np.float32) / 255.0
+
+def _v9_blur(arr: np.ndarray, radius: float) -> np.ndarray:
+    img = Image.fromarray((np.clip(arr, 0, 1) * 255).astype(np.uint8), mode="L")
+    img = img.filter(ImageFilter.GaussianBlur(max(0.05, float(radius))))
+    return np.asarray(img, dtype=np.float32) / 255.0
+
+def build_v9_artistic_channels(depth: np.ndarray, image: Image.Image, cfg: MemorialCoinConfig) -> dict[str, np.ndarray]:
+    size = depth.shape[0]
+    luminance = _v9_luminance(image, size)
+    broad = _v9_blur(luminance, max(1.0, size / 55.0))
+    micro = np.abs(luminance - _v9_blur(luminance, max(0.6, size / 130.0)))
+    gy, gx = np.gradient(broad.astype(np.float32))
+    edge = _normalize(np.sqrt(gx * gx + gy * gy))
+    hx = _v9_blur(gx, max(0.5, size / 180.0))
+    hy = _v9_blur(gy, max(0.5, size / 180.0))
+    highlight = _normalize(np.clip((-0.55 * hx) + (-0.75 * hy) + 0.35 * broad, 0, None))
+    style = V9_METAL_STYLES.get(cfg.metal_style, V9_METAL_STYLES["Sterling Silver"])
+    tone_amount = np.clip((cfg.tone_compression + style["tone"]) * 0.5, 0, 1)
+    edge_amount = np.clip((cfg.edge_crest_strength + style["edge"]) * 0.5, 0, 1)
+    highlight_amount = np.clip((cfg.highlight_sculpt_strength + style["highlight"]) * 0.5, 0, 1)
+    micro_amount = np.clip((cfg.micro_detail_suppression + style["micro"]) * 0.5, 0, 1)
+    compressed = np.clip(0.5 + (depth - 0.5) * (1.0 - 0.58 * tone_amount), 0, 1)
+    levels = max(2.0, 7.0 - 3.0 * tone_amount)
+    bands = np.round(compressed * levels) / levels
+    tone_compressed = np.clip(compressed * 0.62 + bands * 0.38, 0, 1)
+    crest = np.clip(edge * edge_amount, 0, 1)
+    highlight_bias = np.clip(highlight * highlight_amount, 0, 1)
+    micro_detail_keep = np.clip(1.0 - micro * micro_amount, 0.35, 1.0)
+    return {"tone_compressed": tone_compressed, "edge_crest": crest, "highlight_bias": highlight_bias, "micro_detail_keep": micro_detail_keep}
+
+def apply_v9_jewelry_artistic_relief(depth: np.ndarray, image: Image.Image, cfg: MemorialCoinConfig) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    channels = build_v9_artistic_channels(depth, image, cfg)
+    style = V9_METAL_STYLES.get(cfg.metal_style, V9_METAL_STYLES["Sterling Silver"])
+    art_strength = np.clip(cfg.relief_art_strength, 0, 1)
+    curve = float(np.clip(cfg.relief_depth_curve, 0.55, 1.45))
+    shaped = np.power(np.clip(channels["tone_compressed"], 0, 1), curve)
+    crest = channels["edge_crest"] * np.clip((cfg.edge_crest_strength + style["edge"]) * 0.5, 0, 1)
+    highlight = channels["highlight_bias"] * np.clip((cfg.highlight_sculpt_strength + style["highlight"]) * 0.5, 0, 1)
+    micro_keep = channels["micro_detail_keep"]
+    artistic = shaped * 0.68 + np.maximum(shaped, crest * 0.52) * 0.17 + np.maximum(shaped, highlight * 0.46) * 0.15
+    artistic *= 0.78 + 0.22 * micro_keep
+    artistic = np.clip(artistic, 0, 1)
+    final = np.clip(depth * (1.0 - art_strength) + artistic * art_strength, 0, 1)
+    return final, channels
 
 def make_memorial_coin_depth(image_bytes: bytes, cfg: MemorialCoinConfig) -> np.ndarray:
     image = Image.open(io.BytesIO(image_bytes))
