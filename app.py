@@ -683,6 +683,8 @@ if relief_file:
         inspect_memorial_coin,
         validate_v7_production,
         build_v7_portrait_layers,
+        validate_v8_production,
+        build_v8_sculpt_channels,
     )
 
     col1, col2, col3 = st.columns(3)
@@ -801,6 +803,22 @@ if relief_file:
         background_suppression = st.slider("Background Suppression", 0.0, 1.0, 0.86, 0.05, key="v7_background_suppression")
         portrait_sculpt_mix = st.slider("Portrait Sculpt Mix", 0.0, 1.0, 0.78, 0.05, key="v7_portrait_mix")
 
+    st.subheader("💎 V8 Jewelry Sculpting")
+    st.caption(
+        "V8 adds independent contour, eye-socket, nose-bridge, lip, and chin sculpt channels. "
+        "These are proportional image-space guides for relief design, not biometric landmarks."
+    )
+    v8_col1, v8_col2, v8_col3 = st.columns(3)
+    with v8_col1:
+        contour_strength = st.slider("Face Contour", 0.0, 1.0, 0.62, 0.05, key="v8_contour")
+        eye_socket_strength = st.slider("Eye Sockets", 0.0, 1.0, 0.58, 0.05, key="v8_eye_socket")
+    with v8_col2:
+        nose_bridge_strength = st.slider("Nose Bridge", 0.0, 1.0, 0.68, 0.05, key="v8_nose_bridge")
+        lip_strength = st.slider("Lips", 0.0, 1.0, 0.55, 0.05, key="v8_lips")
+    with v8_col3:
+        chin_strength = st.slider("Chin", 0.0, 1.0, 0.48, 0.05, key="v8_chin")
+        sculpt_detail_mix = st.slider("Sculpt Detail Mix", 0.0, 1.0, 0.64, 0.05, key="v8_detail_mix")
+
     st.subheader("🛡️ V6 Production Refinement")
     v6_col1, v6_col2, v6_col3 = st.columns(3)
     with v6_col1:
@@ -876,6 +894,12 @@ if relief_file:
         clothing_strength=clothing_strength,
         background_suppression=background_suppression,
         portrait_sculpt_mix=portrait_sculpt_mix,
+        contour_strength=contour_strength,
+        eye_socket_strength=eye_socket_strength,
+        nose_bridge_strength=nose_bridge_strength,
+        lip_strength=lip_strength,
+        chin_strength=chin_strength,
+        sculpt_detail_mix=sculpt_detail_mix,
     )
 
     if st.button("🔎 Preview V5 Portrait Coin", use_container_width=True, key="v3_preview"):
@@ -883,6 +907,22 @@ if relief_file:
             with st.spinner("Analyzing portrait and building coin relief preview..."):
                 preview = preview_memorial_coin(relief_file.getvalue(), cfg)
             st.image(preview, caption="V7 Intelligent Portrait Relief Height Map", use_container_width=True)
+            with st.expander("💎 V8 Jewelry Sculpt Channels"):
+                source_image = Image.open(io.BytesIO(relief_file.getvalue()))
+                v8_channels = build_v8_sculpt_channels(source_image, cfg.relief.resolution)
+                channel_cols = st.columns(5)
+                channel_labels = [
+                    ("face_contour", "Face Contour"),
+                    ("eye_sockets", "Eye Sockets"),
+                    ("nose_bridge", "Nose Bridge"),
+                    ("lips", "Lips"),
+                    ("chin", "Chin"),
+                ]
+                for idx, (channel_key, label) in enumerate(channel_labels):
+                    with channel_cols[idx]:
+                        channel_img = (np.clip(v8_channels[channel_key], 0, 1) * 255).astype(np.uint8)
+                        st.image(channel_img, caption=label, use_container_width=True)
+
             with st.expander("🔬 V7 Portrait Sculpt Layers"):
                 source_image = Image.open(io.BytesIO(relief_file.getvalue()))
                 v7_layers = build_v7_portrait_layers(source_image, cfg.relief.resolution)
@@ -914,16 +954,16 @@ if relief_file:
             st.session_state["v4_stl"] = stl_bytes
             st.session_state["v4_inspection"] = inspection
             source_image = Image.open(io.BytesIO(relief_file.getvalue()))
-            st.session_state["v5_production_report"] = validate_v7_production(
+            st.session_state["v5_production_report"] = validate_v8_production(
                 cfg, source_image, inspection, production_preset
             )
-            st.success("V7 memorial portrait coin STL generated and checked.")
+            st.success("V8 memorial portrait coin STL generated and checked.")
         except Exception as error:
             st.error(f"V5 STL generation failed: {error}")
 
     inspection = st.session_state.get("v4_inspection")
     if inspection:
-        st.subheader("📐 V7 Production Report")
+        st.subheader("📐 V8 Production Report")
         report = st.session_state.get("v5_production_report")
         if report:
             if report.get("production_ready"):
@@ -941,9 +981,9 @@ if relief_file:
 
     if st.session_state.get("v4_stl"):
         st.download_button(
-            "⬇️ Download V7 STL",
+            "⬇️ Download V8 STL",
             st.session_state["v4_stl"],
-            "jewelry_memorial_portrait_coin_v7.stl",
+            "jewelry_memorial_portrait_coin_v8.stl",
             "model/stl",
             use_container_width=True,
             key="v3_download_stl",
