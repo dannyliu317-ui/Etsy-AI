@@ -519,6 +519,137 @@ def apply_v9_jewelry_artistic_relief(
 
 
 
+def make_memorial_coin_depth(image_bytes: bytes, cfg: MemorialCoinConfig) -> np.ndarray:
+    image = Image.open(io.BytesIO(image_bytes))
+    rcfg = cfg.relief
+    depth = make_depth_map(
+        image_bytes,
+        resolution=rcfg.resolution,
+        mode=rcfg.depth_model,
+        invert=rcfg.invert_depth,
+        gamma=rcfg.depth_gamma,
+        relief_mode="Photo",
+    )
+
+    focus = _face_focus_mask(image, rcfg.resolution) if cfg.face_focus else np.ones_like(depth)
+    # Keep a small amount of background relief so silhouettes remain natural,
+    # but strongly prioritize facial geometry.
+    depth = depth * (cfg.background_strength + (1.0 - cfg.background_strength) * focus)
+
+    if cfg.face_focus:
+        depth = np.power(np.clip(depth, 0, 1), 1.0 / max(0.65, cfg.face_boost))
+        features = _portrait_feature_map(image, rcfg.resolution)
+        if features.max() > 0:
+            # Protect eye/nose/mouth transitions from excessive smoothing.
+            protected = np.clip(depth + features * cfg.feature_protection * 0.22, 0, 1)
+            depth = np.maximum(depth, protected)
+
+        hair = _portrait_hair_map(image, rcfg.resolution)
+        if hair.max() > 0:
+            depth = np.clip(depth + hair * cfg.hair_preservation * 0.10, 0, 1)
+
+    # Explicit background flattening keeps the portrait from becoming a noisy
+    # full-frame terrain map while preserving a small silhouette cue.
+    background_factor = np.clip(1.0 - cfg.background_flatten, 0.05, 1.0)
+    depth = depth * (background_factor + (1.0 - background_factor) * focus)
+
+    if cfg.coin_style == "Deep Relief":
+        depth = np.power(np.clip(depth, 0, 1), 0.78)
+    elif cfg.coin_style == "Soft Relief":
+        depth = np.power(np.clip(depth, 0, 1), 1.22)
+
+    # Compress the photo relief slightly so the border/rim remains visually dominant.
+    depth = np.clip(depth * 0.88, 0, 1)
+
+    mask = _apply_hole(
+        _shape_mask(rcfg.resolution, rcfg.shape),
+        rcfg.hole_diameter_mm,
+        rcfg.hole_offset_mm,
+        rcfg.width_mm,
+        rcfg.height_mm,
+    )
+
+    px_per_mm = rcfg.resolution / max(rcfg.width_mm, rcfg.height_mm)
+    border_px = max(1, int(cfg.border_width_mm * px_per_mm))
+    inner_px = max(1, int(cfg.inner_ring_width_mm * px_per_mm))
+    outer, inner, inner2 = _ring_masks(rcfg.resolution, rcfg.shape, border_px, inner_px)
+
+    # Raised perimeter and inner ring.
+    border = outer & ~inner
+    ring = inner & ~inner2
+    border_strength = min(0.45, max(0.03, cfg.border_height_mm / max(0.1, rcfg.relief_height_mm)))
+    ring_strength = border_strength * 0.55
+    depth = np.clip(depth + border.astype(np.float32) * border_strength + ring.astype(np.float32) * ring_strength, 0, 1)
+
+    depth = _add_text_height(
+        depth,
+        cfg.text,
+        cfg.text_position,
+        cfg.text_size,
+        max(0.03, cfg.text_height_mm / max(0.1, rcfg.relief_height_mm)),
+        cfg.text_mode,
+    )
+
+    # V7 intelligent portrait sculpting before final production refinement.
+    depth, _v7_layers = apply_v7_portrait_sculpt(depth, image, cfg)
+    # V8 jewelry sculpting: contour and individual facial-structure channels.
+    depth, _v8_channels = apply_v8_jewelry_sculpt(depth, image, cfg)
+    depth, _v9_channels = apply_v9_jewelry_artistic_relief(depth, image, cfg)
+
+    # V6 surface refinement: conservative smoothing before final mask.
+    depth = apply_v6_surface_refinement(depth, cfg)
+
+    # V6 production-safe zone: keep the portrait away from critical edges/hole.
+    safe_zone = build_v6_safe_zone_mask(
+        rcfg.resolution,
+        rcfg.shape,
+        cfg.safety_margin_mm,
+        rcfg.width_mm,
+        rcfg.height_mm,
+        rcfg.hole_diameter_mm,
+        rcfg.hole_offset_mm,
+    )
+    safe_strength = np.clip(cfg.safe_zone_strength, 0.0, 1.0)
+    depth = depth * (safe_strength * safe_zone + (1.0 - safe_strength) * mask)
+
+    # Remove relief from the hanging hole and outside the coin.
+    depth *= mask
+    return _normalize(depth)
+
+
+def generate_memorial_coin_stl(image_bytes: bytes, cfg: MemorialCoinConfig) -> bytes:
+    depth = make_memorial_coin_depth(image_bytes, cfg)
+    rcfg = cfg.relief
+    mask = _apply_hole(
+        _shape_mask(rcfg.resolution, rcfg.shape),
+        rcfg.hole_diameter_mm,
+        rcfg.hole_offset_mm,
+        rcfg.width_mm,
+        rcfg.height_mm,
+    )
+    # Keep the edge crisp enough for casting/printing.
+    depth_img = Image.fromarray((depth * 255).astype(np.uint8))
+    depth_img = depth_img.filter(ImageFilter.GaussianBlur(max(0.05, cfg.edge_softness)))
+    depth = np.asarray(depth_img, dtype=np.float32) / 255.0
+    mesh = _mesh_from_heightmap(depth, mask, rcfg)
+    mesh.apply_translation(-mesh.centroid)
+    return mesh.export(file_type="stl")
+
+
+def preview_memorial_coin(image_bytes: bytes, cfg: MemorialCoinConfig) -> bytes:
+    depth = make_memorial_coin_depth(image_bytes, cfg)
+    img = Image.fromarray((depth * 255).astype(np.uint8), mode="L")
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()
+
+
+def inspect_memorial_coin(stl_bytes: bytes) -> dict:
+    result = inspect_stl(stl_bytes)
+    result["product_type"] = "Jewelry Memorial Portrait Coin"
+    return result
+
+
 # ============================================================
 # V5 PRODUCTION / MANUFACTURABILITY ENGINE
 # ============================================================
