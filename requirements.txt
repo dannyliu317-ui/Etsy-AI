@@ -4,6 +4,7 @@ pillow>=10.0.0
 numpy>=1.26.0
 trimesh>=4.0.0
 scipy>=1.11.0
+networkx>=3.0
 # Optional AI depth mode:
 # torch>=2.2.0
 # transformers>=4.45.0
