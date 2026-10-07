@@ -1,3 +1,13 @@
 streamlit>=1.40.0
 openai>=1.50.0
 pillow>=10.0.0
+numpy>=1.26.0
+trimesh>=4.0.0
+scipy>=1.11.0
+networkx>=3.0
+# Optional AI depth mode:
+# torch>=2.2.0
+# transformers>=4.45.0
+
+# Optional V3 face localization:
+# opencv-python-headless>=4.10.0
