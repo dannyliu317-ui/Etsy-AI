@@ -13,6 +13,8 @@ from image_studio import (
 
 from image_generator import generate_images
 
+from relief_generator import ReliefConfig, generate_relief_stl, preview_heightmap
+
 
 # =========================================================
 # PAGE CONFIG
@@ -651,6 +653,121 @@ if result:
         st.json(
             result
         )
+
+
+
+
+# =========================================================
+# PERSONALIZED RELIEF PENDANT
+# =========================================================
+
+st.divider()
+st.header("🪙 3. Personalized Relief Pendant")
+st.write(
+    "Turn a portrait or artwork into a shallow-relief pendant STL. "
+    "AI Depth is optional; grayscale mode works without a model download."
+)
+
+relief_file = st.file_uploader(
+    "Upload a portrait / artwork for relief",
+    type=["jpg", "jpeg", "png", "webp"],
+    key="relief_upload",
+)
+
+relief_col1, relief_col2 = st.columns(2)
+
+with relief_col1:
+    relief_shape = st.selectbox(
+        "Pendant Shape",
+        ["Circle", "Oval", "Heart", "Dog Tag"],
+        key="relief_shape",
+    )
+    relief_depth_mode = st.selectbox(
+        "Depth Method",
+        ["Grayscale", "AI Depth"],
+        key="relief_depth_mode",
+    )
+    relief_resolution = st.select_slider(
+        "Mesh Resolution",
+        options=[120, 180, 240, 300],
+        value=180,
+        key="relief_resolution",
+    )
+
+with relief_col2:
+    relief_width = st.number_input(
+        "Width (mm)", min_value=10.0, max_value=100.0,
+        value=30.0, step=1.0, key="relief_width",
+    )
+    relief_height = st.number_input(
+        "Height (mm)", min_value=10.0, max_value=100.0,
+        value=30.0, step=1.0, key="relief_height",
+    )
+    relief_height_z = st.number_input(
+        "Relief Height (mm)", min_value=0.2, max_value=5.0,
+        value=1.2, step=0.1, key="relief_z",
+    )
+    relief_base = st.number_input(
+        "Base Thickness (mm)", min_value=0.8, max_value=8.0,
+        value=2.0, step=0.1, key="relief_base",
+    )
+    relief_hole = st.number_input(
+        "Hole Diameter (mm)", min_value=1.0, max_value=8.0,
+        value=3.0, step=0.1, key="relief_hole",
+    )
+
+if relief_file:
+    relief_cfg = ReliefConfig(
+        width_mm=relief_width,
+        height_mm=relief_height,
+        base_thickness_mm=relief_base,
+        relief_height_mm=relief_height_z,
+        hole_diameter_mm=relief_hole,
+        resolution=relief_resolution,
+        shape=relief_shape,
+        depth_model=relief_depth_mode,
+    )
+
+    if st.button("🔎 Preview Depth Map", use_container_width=True, key="preview_relief"):
+        try:
+            preview = preview_heightmap(
+                relief_file.getvalue(), relief_cfg
+            )
+            st.image(
+                preview,
+                caption="Height / Depth Map Preview",
+                use_container_width=True,
+            )
+        except Exception as error:
+            st.error(f"Depth preview failed: {error}")
+
+    if st.button(
+        "🪙 Generate Relief Pendant STL",
+        type="primary",
+        use_container_width=True,
+        key="generate_relief_stl",
+    ):
+        try:
+            with st.spinner("Generating watertight relief pendant STL..."):
+                stl_bytes = generate_relief_stl(
+                    relief_file.getvalue(), relief_cfg
+                )
+
+            st.session_state["relief_stl"] = stl_bytes
+            st.session_state["relief_cfg"] = relief_cfg
+            st.success("Relief pendant STL generated successfully!")
+        except Exception as error:
+            st.error(f"Relief STL generation failed: {error}")
+
+if st.session_state.get("relief_stl"):
+    st.download_button(
+        "⬇️ Download Relief Pendant STL",
+        data=st.session_state["relief_stl"],
+        file_name="personalized_relief_pendant.stl",
+        mime="model/stl",
+        use_container_width=True,
+        key="download_relief_stl",
+    )
 
 
 # =========================================================
