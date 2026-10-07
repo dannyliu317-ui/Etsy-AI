@@ -737,7 +737,7 @@ if relief_file:
         background_flatten = st.slider("Background Flattening", 0.0, 1.0, 0.78, 0.05, key="v4_background_flatten")
 
     st.subheader("🏭 V5 Production Mode")
-    from memorial_coin_v3 import get_production_preset, validate_memorial_coin_production
+    from memorial_coin_v3 import get_production_preset, validate_memorial_coin_production, validate_v6_production
 
     prod_col1, prod_col2 = st.columns(2)
     with prod_col1:
@@ -782,6 +782,24 @@ if relief_file:
         inner_ring = st.slider("Inner Ring Width (mm)", 0.2, 1.5, 0.55, 0.05, key="v3_inner_ring")
     with ring_col3:
         border_height = st.slider("Border Height (mm)", 0.1, 0.6, 0.25, 0.05, key="v3_border_height")
+
+    st.subheader("🛡️ V6 Production Refinement")
+    v6_col1, v6_col2, v6_col3 = st.columns(3)
+    with v6_col1:
+        safety_margin = st.number_input(
+            "Safe Edge / Hole Margin (mm)", 0.3, 1.5, 0.65, 0.05,
+            key="v6_safety_margin",
+        )
+    with v6_col2:
+        surface_smoothing = st.slider(
+            "Surface Smoothing", 0.0, 0.5, 0.18, 0.02,
+            key="v6_surface_smoothing",
+        )
+    with v6_col3:
+        safe_zone_strength = st.slider(
+            "Safe Zone Strength", 0.0, 1.0, 0.75, 0.05,
+            key="v6_safe_zone_strength",
+        )
 
     st.subheader("✍️ Personalization")
     text_col1, text_col2, text_col3 = st.columns(3)
@@ -853,14 +871,14 @@ if relief_file:
             inspection = inspect_memorial_coin(stl_bytes)
             st.session_state["v4_stl"] = stl_bytes
             st.session_state["v4_inspection"] = inspection
-            st.session_state["v5_production_report"] = validate_memorial_coin_production(cfg, inspection, production_preset)
-            st.success("V5 memorial coin STL generated and checked.")
+            st.session_state["v5_production_report"] = validate_v6_production(cfg, inspection, production_preset)
+            st.success("V6 memorial coin STL generated and checked.")
         except Exception as error:
             st.error(f"V5 STL generation failed: {error}")
 
     inspection = st.session_state.get("v4_inspection")
     if inspection:
-        st.subheader("📐 V5 Production Report")
+        st.subheader("📐 V6 Production Report")
         report = st.session_state.get("v5_production_report")
         if report:
             if report.get("production_ready"):
@@ -887,7 +905,7 @@ if relief_file:
         )
 
     st.info(
-        "V5 adds production presets, process-aware guidelines, and manufacturability checks. V4 uses optional OpenCV face localization when available. Face feature protection, hair/silhouette preservation, and background flattening are shaping aids rather than biometric identification. If face detection "
+        "V6 adds production-safe zones, surface refinement, personalization manufacturability checks, and V5 process presets. V4 uses optional OpenCV face localization when available. Face feature protection, hair/silhouette preservation, and background flattening are shaping aids rather than biometric identification. If face detection "
         "is unavailable, it safely falls back to the V2-style depth workflow."
     )
 
