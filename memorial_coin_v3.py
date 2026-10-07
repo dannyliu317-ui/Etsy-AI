@@ -585,8 +585,20 @@ def _v91_background_zero_map(image: Image.Image, size: int) -> np.ndarray:
         (size, size), Image.Resampling.LANCZOS
     )
     white_small = np.asarray(white_img, dtype=np.float32) / 255.0
-    content = _portrait_background_suppression(image, size)
-    background = np.clip(white_small * (1.0 - content * 0.96), 0, 1)
+    # Use a tighter portrait core than the broad V7 focus ellipse. This keeps
+    # white cheeks/shirt and hair inside the portrait while allowing the outer
+    # studio background to collapse toward zero.
+    face_core = _v8_soft_ellipse(
+        size, (x0 + x1) / 2, (y0 + y1) / 2,
+        max(8.0, (x1 - x0) * 0.70), max(10.0, (y1 - y0) * 0.88)
+    )
+    hair_core = _portrait_hair_map(image, size)
+    clothing_core = _portrait_clothing_map(image, size)
+    content = np.clip(
+        np.maximum(face_core, np.maximum(hair_core * 0.96, clothing_core * 0.92)),
+        0, 1
+    )
+    background = np.clip(white_small * (1.0 - content), 0, 1)
     return np.clip(_v9_blur(background, max(0.8, size / 180.0)), 0, 1)
 
 
