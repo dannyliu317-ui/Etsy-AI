@@ -681,6 +681,8 @@ if relief_file:
         make_memorial_coin_depth,
         preview_memorial_coin,
         inspect_memorial_coin,
+        validate_v7_production,
+        build_v7_portrait_layers,
     )
 
     col1, col2, col3 = st.columns(3)
@@ -783,6 +785,22 @@ if relief_file:
     with ring_col3:
         border_height = st.slider("Border Height (mm)", 0.1, 0.6, 0.25, 0.05, key="v3_border_height")
 
+    st.subheader("🧑‍🔬 V7 Intelligent Portrait Sculpting")
+    st.caption(
+        "V7 separates broad face planes, facial features, hair/silhouette, and clothing/shoulders. "
+        "These are image-space sculpting aids, not biometric landmark detection."
+    )
+    v7_col1, v7_col2, v7_col3 = st.columns(3)
+    with v7_col1:
+        face_structure_strength = st.slider("Face Structure", 0.0, 1.0, 0.72, 0.05, key="v7_face_structure")
+        feature_strength = st.slider("Eyes / Nose / Mouth", 0.0, 1.0, 0.82, 0.05, key="v7_feature_strength")
+    with v7_col2:
+        hair_strength = st.slider("Hair / Silhouette", 0.0, 1.0, 0.52, 0.05, key="v7_hair_strength")
+        clothing_strength = st.slider("Clothing / Shoulders", 0.0, 1.0, 0.32, 0.05, key="v7_clothing_strength")
+    with v7_col3:
+        background_suppression = st.slider("Background Suppression", 0.0, 1.0, 0.86, 0.05, key="v7_background_suppression")
+        portrait_sculpt_mix = st.slider("Portrait Sculpt Mix", 0.0, 1.0, 0.78, 0.05, key="v7_portrait_mix")
+
     st.subheader("🛡️ V6 Production Refinement")
     v6_col1, v6_col2, v6_col3 = st.columns(3)
     with v6_col1:
@@ -849,13 +867,37 @@ if relief_file:
         feature_protection=feature_protection,
         hair_preservation=hair_preservation,
         background_flatten=background_flatten,
+        safety_margin_mm=safety_margin,
+        surface_smoothing=surface_smoothing,
+        safe_zone_strength=safe_zone_strength,
+        face_structure_strength=face_structure_strength,
+        feature_strength=feature_strength,
+        hair_strength=hair_strength,
+        clothing_strength=clothing_strength,
+        background_suppression=background_suppression,
+        portrait_sculpt_mix=portrait_sculpt_mix,
     )
 
     if st.button("🔎 Preview V5 Portrait Coin", use_container_width=True, key="v3_preview"):
         try:
             with st.spinner("Analyzing portrait and building coin relief preview..."):
                 preview = preview_memorial_coin(relief_file.getvalue(), cfg)
-            st.image(preview, caption="V4 Jewelry Relief Height Map", use_container_width=True)
+            st.image(preview, caption="V7 Intelligent Portrait Relief Height Map", use_container_width=True)
+            with st.expander("🔬 V7 Portrait Sculpt Layers"):
+                source_image = Image.open(io.BytesIO(relief_file.getvalue()))
+                v7_layers = build_v7_portrait_layers(source_image, cfg.relief.resolution)
+                layer_cols = st.columns(5)
+                layer_labels = [
+                    ("face_structure", "Face Structure"),
+                    ("facial_features", "Facial Features"),
+                    ("hair_silhouette", "Hair / Silhouette"),
+                    ("clothing_silhouette", "Clothing / Shoulders"),
+                    ("background_suppression", "Background Suppression"),
+                ]
+                for idx, (layer_key, label) in enumerate(layer_labels):
+                    with layer_cols[idx]:
+                        layer_img = (np.clip(v7_layers[layer_key], 0, 1) * 255).astype(np.uint8)
+                        st.image(layer_img, caption=label, use_container_width=True)
         except Exception as error:
             st.error(f"V5 preview failed: {error}")
 
@@ -871,14 +913,17 @@ if relief_file:
             inspection = inspect_memorial_coin(stl_bytes)
             st.session_state["v4_stl"] = stl_bytes
             st.session_state["v4_inspection"] = inspection
-            st.session_state["v5_production_report"] = validate_v6_production(cfg, inspection, production_preset)
-            st.success("V6 memorial coin STL generated and checked.")
+            source_image = Image.open(io.BytesIO(relief_file.getvalue()))
+            st.session_state["v5_production_report"] = validate_v7_production(
+                cfg, source_image, inspection, production_preset
+            )
+            st.success("V7 memorial portrait coin STL generated and checked.")
         except Exception as error:
             st.error(f"V5 STL generation failed: {error}")
 
     inspection = st.session_state.get("v4_inspection")
     if inspection:
-        st.subheader("📐 V6 Production Report")
+        st.subheader("📐 V7 Production Report")
         report = st.session_state.get("v5_production_report")
         if report:
             if report.get("production_ready"):
@@ -896,16 +941,16 @@ if relief_file:
 
     if st.session_state.get("v4_stl"):
         st.download_button(
-            "⬇️ Download V5 STL",
+            "⬇️ Download V7 STL",
             st.session_state["v4_stl"],
-            "jewelry_memorial_portrait_coin_v5.stl",
+            "jewelry_memorial_portrait_coin_v7.stl",
             "model/stl",
             use_container_width=True,
             key="v3_download_stl",
         )
 
     st.info(
-        "V6 adds production-safe zones, surface refinement, personalization manufacturability checks, and V5 process presets. V4 uses optional OpenCV face localization when available. Face feature protection, hair/silhouette preservation, and background flattening are shaping aids rather than biometric identification. If face detection "
+        "V7 adds layered portrait sculpting for face structure, facial features, hair/silhouette, clothing/shoulders, and background suppression while retaining V6 safe-zone refinement and V5 process presets. V4 uses optional OpenCV face localization when available. Face feature protection, hair/silhouette preservation, and background flattening are shaping aids rather than biometric identification. If face detection "
         "is unavailable, it safely falls back to the V2-style depth workflow."
     )
 
