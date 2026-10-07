@@ -180,7 +180,6 @@ def _mesh_from_heightmap(height: np.ndarray, mask: np.ndarray, cfg: ReliefConfig
 
     top_faces = []
     bottom_faces = []
-    side_faces = []
 
     def idx(r, c):
         return r * n + c
@@ -189,31 +188,38 @@ def _mesh_from_heightmap(height: np.ndarray, mask: np.ndarray, cfg: ReliefConfig
 
     for r in range(n - 1):
         for c in range(n - 1):
-            a, b, d, e = idx(r, c), idx(r, c + 1), idx(r + 1, c), idx(r + 1, c + 1)
+            a, b = idx(r, c), idx(r, c + 1)
+            d, e = idx(r + 1, c), idx(r + 1, c + 1)
             if mask[r, c] and mask[r, c + 1] and mask[r + 1, c] and mask[r + 1, c + 1]:
                 top_faces.extend(((a, b, e), (a, e, d)))
-                bottom_faces.extend(((offset + a, offset + e, offset + b),
-                                     (offset + a, offset + d, offset + e)))
+                bottom_faces.extend(
+                    ((offset + a, offset + e, offset + b),
+                     (offset + a, offset + d, offset + e))
+                )
 
-    # Connect every mask boundary edge. This creates a closed solid.
-    for r in range(n - 1):
-        for c in range(n - 1):
-            cells = [
-                (r, c, mask[r, c]),
-                (r, c + 1, mask[r, c + 1]),
-                (r + 1, c, mask[r + 1, c]),
-                (r + 1, c + 1, mask[r + 1, c + 1]),
-            ]
-            for (r1, c1, inside1), (r2, c2, inside2) in (
-                (cells[0], cells[1]),
-                (cells[0], cells[2]),
-            ):
-                if inside1 != inside2:
-                    a = idx(r1, c1)
-                    b = idx(r2, c2)
-                    side_faces.extend(((a, offset + b, b), (a, offset + a, offset + b)))
+    # Build side walls from boundary edges of the top surface.
+    # An edge used by exactly one top triangle is on the perimeter
+    # (including the perimeter of the hanging hole).
+    edge_counts = {}
+    for face in top_faces:
+        for u, v in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
+            key = tuple(sorted((u, v)))
+            edge_counts[key] = edge_counts.get(key, 0) + 1
 
-    faces = np.asarray(top_faces + bottom_faces + side_faces, dtype=np.int64)
+    side_faces = []
+    for (u, v), count in edge_counts.items():
+        if count != 1:
+            continue
+        side_faces.append((u, v, offset + v))
+        side_faces.append((u, offset + v, offset + u))
+
+    faces = np.asarray(
+        top_faces + bottom_faces + side_faces,
+        dtype=np.int64,
+    )
+    if len(faces) == 0:
+        raise ValueError("The selected pendant mask produced no printable faces.")
+
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=True)
 
     # Repair and remove disconnected fragments.
