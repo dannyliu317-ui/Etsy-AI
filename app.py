@@ -13,7 +13,7 @@ from image_studio import (
 
 from image_generator import generate_images
 
-from relief_generator import ReliefConfig, generate_relief_stl, preview_heightmap
+from relief_generator import ReliefConfig, generate_relief_stl, preview_heightmap, preview_hillshade, export_relief_glb, inspect_stl, validate_relief_config
 
 
 # =========================================================
@@ -658,116 +658,149 @@ if result:
 
 
 # =========================================================
-# PERSONALIZED RELIEF PENDANT
+# PERSONALIZED PORTRAIT RELIEF PENDANT
 # =========================================================
 
 st.divider()
-st.header("🪙 3. Personalized Relief Pendant")
+st.header("🪙 3. Personalized Portrait Relief Pendant")
 st.write(
-    "Turn a portrait or artwork into a shallow-relief pendant STL. "
-    "AI Depth is optional; grayscale mode works without a model download."
+    "Create a portrait-style relief pendant from a photo, preview the "
+    "depth and shaded relief, export GLB/STL, and inspect production dimensions."
 )
 
 relief_file = st.file_uploader(
-    "Upload a portrait / artwork for relief",
+    "Upload portrait / memorial photo / artwork",
     type=["jpg", "jpeg", "png", "webp"],
     key="relief_upload",
 )
 
-relief_col1, relief_col2 = st.columns(2)
-
-with relief_col1:
-    relief_shape = st.selectbox(
-        "Pendant Shape",
-        ["Circle", "Oval", "Heart", "Dog Tag"],
-        key="relief_shape",
-    )
-    relief_depth_mode = st.selectbox(
-        "Depth Method",
-        ["Grayscale", "AI Depth"],
-        key="relief_depth_mode",
-    )
-    relief_resolution = st.select_slider(
-        "Mesh Resolution",
-        options=[120, 180, 240, 300],
-        value=180,
-        key="relief_resolution",
-    )
-
-with relief_col2:
-    relief_width = st.number_input(
-        "Width (mm)", min_value=10.0, max_value=100.0,
-        value=30.0, step=1.0, key="relief_width",
-    )
-    relief_height = st.number_input(
-        "Height (mm)", min_value=10.0, max_value=100.0,
-        value=30.0, step=1.0, key="relief_height",
-    )
-    relief_height_z = st.number_input(
-        "Relief Height (mm)", min_value=0.2, max_value=5.0,
-        value=1.2, step=0.1, key="relief_z",
-    )
-    relief_base = st.number_input(
-        "Base Thickness (mm)", min_value=0.8, max_value=8.0,
-        value=2.0, step=0.1, key="relief_base",
-    )
-    relief_hole = st.number_input(
-        "Hole Diameter (mm)", min_value=1.0, max_value=8.0,
-        value=3.0, step=0.1, key="relief_hole",
-    )
-
 if relief_file:
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        relief_mode = st.selectbox(
+            "Relief Mode", ["Portrait", "Photo"], key="relief_mode"
+        )
+        relief_shape = st.selectbox(
+            "Pendant Shape", ["Circle", "Oval", "Heart", "Dog Tag"], key="relief_shape"
+        )
+        relief_depth_mode = st.selectbox(
+            "Depth Method", ["AI Depth", "Grayscale"], key="relief_depth_mode"
+        )
+    with col2:
+        relief_width = st.number_input(
+            "Width (mm)", 10.0, 100.0, 30.0, 1.0, key="relief_width"
+        )
+        relief_height = st.number_input(
+            "Height (mm)", 10.0, 100.0, 30.0, 1.0, key="relief_height"
+        )
+        relief_base = st.number_input(
+            "Base Thickness (mm)", 1.0, 8.0, 2.0, 0.1, key="relief_base"
+        )
+    with col3:
+        relief_z = st.number_input(
+            "Relief Height (mm)", 0.2, 4.0, 1.2, 0.1, key="relief_z"
+        )
+        relief_hole = st.number_input(
+            "Hanging Hole (mm)", 1.0, 8.0, 3.0, 0.1, key="relief_hole"
+        )
+        relief_resolution = st.select_slider(
+            "Mesh Resolution", [120, 180, 240, 300], value=180, key="relief_resolution"
+        )
+
+    relief_invert = st.checkbox(
+        "Invert depth (flip raised/recessed relationship)",
+        value=False,
+        key="relief_invert",
+    )
+    relief_gamma = st.slider(
+        "Portrait Depth Gamma", 0.45, 1.60, 0.85, 0.05, key="relief_gamma",
+        help="Lower values preserve more mid-tone facial detail; higher values emphasize highlights."
+    )
+
     relief_cfg = ReliefConfig(
         width_mm=relief_width,
         height_mm=relief_height,
         base_thickness_mm=relief_base,
-        relief_height_mm=relief_height_z,
+        relief_height_mm=relief_z,
         hole_diameter_mm=relief_hole,
         resolution=relief_resolution,
         shape=relief_shape,
         depth_model=relief_depth_mode,
+        relief_mode=relief_mode,
+        invert_depth=relief_invert,
+        depth_gamma=relief_gamma,
     )
 
-    if st.button("🔎 Preview Depth Map", use_container_width=True, key="preview_relief"):
+    warnings = validate_relief_config(relief_cfg)
+    for warning in warnings:
+        st.warning("⚠️ " + warning)
+
+    preview_col1, preview_col2 = st.columns(2)
+    if st.button("🔎 Preview Depth + Relief", use_container_width=True, key="preview_relief"):
         try:
-            preview = preview_heightmap(
-                relief_file.getvalue(), relief_cfg
-            )
-            st.image(
-                preview,
-                caption="Height / Depth Map Preview",
-                use_container_width=True,
-            )
+            depth_preview = preview_heightmap(relief_file.getvalue(), relief_cfg)
+            shade_preview = preview_hillshade(relief_file.getvalue(), relief_cfg)
+            with preview_col1:
+                st.image(depth_preview, caption="Depth / Height Map", use_container_width=True)
+            with preview_col2:
+                st.image(shade_preview, caption="Simulated Relief Lighting", use_container_width=True)
         except Exception as error:
-            st.error(f"Depth preview failed: {error}")
+            st.error(f"Preview failed: {error}")
 
     if st.button(
-        "🪙 Generate Relief Pendant STL",
+        "🪙 Generate Portrait Relief STL",
         type="primary",
         use_container_width=True,
         key="generate_relief_stl",
     ):
         try:
-            with st.spinner("Generating watertight relief pendant STL..."):
-                stl_bytes = generate_relief_stl(
-                    relief_file.getvalue(), relief_cfg
-                )
-
+            with st.spinner("Building watertight portrait relief mesh..."):
+                stl_bytes = generate_relief_stl(relief_file.getvalue(), relief_cfg)
             st.session_state["relief_stl"] = stl_bytes
             st.session_state["relief_cfg"] = relief_cfg
-            st.success("Relief pendant STL generated successfully!")
+            st.success("Portrait relief STL generated.")
+            inspection = inspect_stl(stl_bytes)
+            st.session_state["relief_inspection"] = inspection
         except Exception as error:
             st.error(f"Relief STL generation failed: {error}")
 
-if st.session_state.get("relief_stl"):
-    st.download_button(
-        "⬇️ Download Relief Pendant STL",
-        data=st.session_state["relief_stl"],
-        file_name="personalized_relief_pendant.stl",
-        mime="model/stl",
-        use_container_width=True,
-        key="download_relief_stl",
-    )
+    inspection = st.session_state.get("relief_inspection")
+    if inspection:
+        st.subheader("📐 STL Production Check")
+        st.json(inspection)
+        if inspection.get("watertight"):
+            st.success("Mesh reports watertight.")
+        else:
+            st.error("Mesh is not watertight. Do not send this file to production yet.")
+
+    if st.session_state.get("relief_stl"):
+        st.download_button(
+            "⬇️ Download STL",
+            st.session_state["relief_stl"],
+            "personalized_portrait_relief.stl",
+            "model/stl",
+            use_container_width=True,
+            key="download_relief_stl",
+        )
+
+    if st.button("🧊 Generate 3D Preview (GLB)", use_container_width=True, key="generate_relief_glb"):
+        try:
+            with st.spinner("Building reduced 3D preview..."):
+                glb = export_relief_glb(relief_file.getvalue(), relief_cfg)
+            st.session_state["relief_glb"] = glb
+            st.success("GLB preview generated. Download and open it in a 3D viewer.")
+        except Exception as error:
+            st.error(f"3D preview failed: {error}")
+
+    if st.session_state.get("relief_glb"):
+        st.download_button(
+            "⬇️ Download 3D Preview GLB",
+            st.session_state["relief_glb"],
+            "personalized_portrait_relief.glb",
+            "model/gltf-binary",
+            use_container_width=True,
+            key="download_relief_glb",
+        )
 
 
 # =========================================================
