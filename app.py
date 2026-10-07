@@ -662,7 +662,7 @@ if result:
 # =========================================================
 
 st.divider()
-st.header("🪙 3. V4 Jewelry Memorial Portrait Coin")
+st.header("🪙 3. V9.1 Jewelry Memorial Portrait Coin")
 st.write(
     "Turn a portrait into a jewelry-style memorial coin relief with optional "
     "face focus, raised border rings, personalized text, hanging hole, and STL inspection."
@@ -687,6 +687,8 @@ if relief_file:
         build_v8_sculpt_channels,
         validate_v9_production,
         build_v9_artistic_channels,
+        validate_v91_production,
+        build_v91_refinement_channels,
     )
 
     col1, col2, col3 = st.columns(3)
@@ -846,6 +848,22 @@ if relief_file:
 
 
 
+    st.subheader("🎯 V9.1 Portrait Jewelry Refinement")
+    st.caption(
+        "V9.1 refines broad face planes, visible eyeglass transitions, nose/lip separation, "
+        "hair strands, and obvious white-background areas."
+    )
+    v91_col1, v91_col2, v91_col3 = st.columns(3)
+    with v91_col1:
+        face_plane_compression = st.slider("Face Plane Compression", 0.0, 1.0, 0.58, 0.05, key="v91_face_plane")
+        eyeglass_protection = st.slider("Eyeglass Protection", 0.0, 1.0, 0.85, 0.05, key="v91_eyeglass")
+    with v91_col2:
+        nose_lip_separation = st.slider("Nose / Lip Separation", 0.0, 1.0, 0.68, 0.05, key="v91_nose_lip")
+        hair_strand_preservation = st.slider("Hair Strand Preservation", 0.0, 1.0, 0.62, 0.05, key="v91_hair")
+    with v91_col3:
+        background_zero_strength = st.slider("Background Zero", 0.0, 1.0, 0.92, 0.05, key="v91_bg_zero")
+        portrait_micro_detail = st.slider("Portrait Micro Detail", 0.0, 1.0, 0.38, 0.05, key="v91_micro")
+
     st.subheader("🛡️ V6 Production Refinement")
     v6_col1, v6_col2, v6_col3 = st.columns(3)
     with v6_col1:
@@ -934,9 +952,15 @@ if relief_file:
         highlight_sculpt_strength=highlight_sculpt_strength,
         relief_depth_curve=relief_depth_curve,
         micro_detail_suppression=micro_detail_suppression,
+        face_plane_compression=face_plane_compression,
+        eyeglass_protection=eyeglass_protection,
+        nose_lip_separation=nose_lip_separation,
+        hair_strand_preservation=hair_strand_preservation,
+        background_zero_strength=background_zero_strength,
+        portrait_micro_detail=portrait_micro_detail,
     )
 
-    if st.button("🔎 Preview V9 Jewelry Portrait Coin", use_container_width=True, key="v3_preview"):
+    if st.button("🔎 Preview V9.1 Jewelry Portrait Coin", use_container_width=True, key="v3_preview"):
         try:
             with st.spinner("Analyzing portrait and building coin relief preview..."):
                 preview = preview_memorial_coin(relief_file.getvalue(), cfg)
@@ -972,19 +996,20 @@ if relief_file:
                         channel_img = (np.clip(v9_channels[channel_key], 0, 1) * 255).astype(np.uint8)
                         st.image(channel_img, caption=label, use_container_width=True)
 
-            with st.expander("✨ V9 Jewelry Relief Art Channels"):
+            with st.expander("🎯 V9.1 Portrait Refinement Channels"):
                 source_image = Image.open(io.BytesIO(relief_file.getvalue()))
-                v9_base = make_memorial_coin_depth(relief_file.getvalue(), cfg)
-                v9_channels = build_v9_artistic_channels(v9_base, source_image, cfg)
-                channel_cols = st.columns(4)
+                v91_base = make_memorial_coin_depth(relief_file.getvalue(), cfg)
+                v91_channels = build_v91_refinement_channels(v91_base, source_image, cfg)
+                channel_cols = st.columns(5)
                 for idx, (channel_key, label) in enumerate([
-                    ("tone_compressed", "Tone Compressed"),
-                    ("edge_crest", "Edge Crest"),
-                    ("highlight_bias", "Highlight Bias"),
-                    ("micro_detail_keep", "Micro Detail Keep"),
+                    ("face_plane", "Face Plane"),
+                    ("eyeglass_protection", "Eyeglass Protection"),
+                    ("nose_lip_separation", "Nose / Lip"),
+                    ("hair_strand_preservation", "Hair Strands"),
+                    ("background_zero", "Background Zero"),
                 ]):
                     with channel_cols[idx]:
-                        channel_img = (np.clip(v9_channels[channel_key], 0, 1) * 255).astype(np.uint8)
+                        channel_img = (np.clip(v91_channels[channel_key], 0, 1) * 255).astype(np.uint8)
                         st.image(channel_img, caption=label, use_container_width=True)
 
             with st.expander("🔬 V7 Portrait Sculpt Layers"):
@@ -1018,22 +1043,22 @@ if relief_file:
             st.session_state["v4_stl"] = stl_bytes
             st.session_state["v4_inspection"] = inspection
             source_image = Image.open(io.BytesIO(relief_file.getvalue()))
-            st.session_state["v5_production_report"] = validate_v9_production(
+            st.session_state["v5_production_report"] = validate_v91_production(
                 cfg, source_image, inspection, production_preset
             )
-            st.success("V9 jewelry portrait coin STL generated and checked.")
+            st.success("V9.1 jewelry portrait coin STL generated and checked.")
         except Exception as error:
             st.error(f"V5 STL generation failed: {error}")
 
     inspection = st.session_state.get("v4_inspection")
     if inspection:
-        st.subheader("📐 V9 Production Report")
+        st.subheader("📐 V9.1 Production Report")
         report = st.session_state.get("v5_production_report")
         if report:
             if report.get("production_ready"):
-                st.success("✅ V5 geometry checks passed — suitable for production review.")
+                st.success("✅ V9.1 geometry checks passed — suitable for production review.")
             else:
-                st.warning("⚠️ V5 needs review before production.")
+                st.warning("⚠️ V9.1 needs review before production.")
             st.metric("Failed Checks", report.get("failed_checks", 0))
             st.metric("Warnings", report.get("warning_count", 0))
             for check in report.get("checks", []):
@@ -1045,9 +1070,9 @@ if relief_file:
 
     if st.session_state.get("v4_stl"):
         st.download_button(
-            "⬇️ Download V9 STL",
+            "⬇️ Download V9.1 STL",
             st.session_state["v4_stl"],
-            "jewelry_memorial_portrait_coin_v9.stl",
+            "jewelry_memorial_portrait_coin_v9_1.stl",
             "model/stl",
             use_container_width=True,
             key="v3_download_stl",
