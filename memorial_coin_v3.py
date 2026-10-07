@@ -50,6 +50,13 @@ class MemorialCoinConfig:
     text_min_width_mm: float = 0.30
     edge_rounding: float = 0.35
     safe_zone_strength: float = 0.75
+    # V7 intelligent portrait sculpting layer weights.
+    face_structure_strength: float = 0.72
+    feature_strength: float = 0.82
+    hair_strength: float = 0.52
+    clothing_strength: float = 0.32
+    background_suppression: float = 0.86
+    portrait_sculpt_mix: float = 0.78
 
 
 def _face_focus_mask(image: Image.Image, size: int) -> np.ndarray:
@@ -218,6 +225,96 @@ def _portrait_hair_map(image: Image.Image, size: int) -> np.ndarray:
     return np.clip(ellipse * (1.0 - 0.65 * face), 0, 1)
 
 
+
+def _portrait_face_box(image: Image.Image):
+    """Return the largest detected face box in source-image pixels, if available."""
+    try:
+        import cv2
+    except ImportError:
+        return None
+    rgb = np.asarray(ImageOps.exif_transpose(image).convert("RGB"))
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    detector = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
+    if len(faces) == 0:
+        return None
+    return max(faces, key=lambda f: int(f[2] * f[3]))
+
+
+def _portrait_structure_map(image: Image.Image, size: int) -> np.ndarray:
+    """Emphasize broad facial planes without inventing sharp facial edges."""
+    face = _portrait_face_box(image)
+    if face is None:
+        return np.zeros((size, size), dtype=np.float32)
+    rgb = np.asarray(ImageOps.exif_transpose(image).convert("RGB"))
+    gray = np.asarray(Image.fromarray(rgb).convert("L"), dtype=np.float32) / 255.0
+    smooth = Image.fromarray((gray * 255).astype(np.uint8), mode="L").filter(ImageFilter.GaussianBlur(max(1.0, size / 90)))
+    broad = np.asarray(smooth, dtype=np.float32) / 255.0
+    x, y, w, h = face
+    sx, sy = size / rgb.shape[1], size / rgb.shape[0]
+    x0, y0, x1, y1 = x * sx, y * sy, (x + w) * sx, (y + h) * sy
+    yy, xx = np.mgrid[0:size, 0:size]
+    rx, ry = max(8.0, (x1 - x0) * 0.72), max(10.0, (y1 - y0) * 0.88)
+    envelope = np.exp(-(((xx - (x0 + x1) / 2) / rx) ** 2 + ((yy - (y0 + y1) / 2) / ry) ** 2)).astype(np.float32)
+    return np.clip(envelope * (0.5 + 0.5 * broad), 0, 1)
+
+
+def _portrait_clothing_map(image: Image.Image, size: int) -> np.ndarray:
+    """Estimate shoulder/clothing silhouette below the detected face."""
+    face = _portrait_face_box(image)
+    if face is None:
+        return np.zeros((size, size), dtype=np.float32)
+    rgb = np.asarray(ImageOps.exif_transpose(image).convert("RGB"))
+    x, y, w, h = face
+    sx, sy = size / rgb.shape[1], size / rgb.shape[0]
+    cx = (x + w / 2) * sx
+    top = (y + h * 0.92) * sy
+    shoulder_y = min(size - 1, (y + h * 2.15) * sy)
+    yy, xx = np.mgrid[0:size, 0:size]
+    width = max(12.0, w * sx * 1.65)
+    vertical = np.clip((yy - top) / max(8.0, shoulder_y - top), 0, 1)
+    shoulder = np.exp(-((xx - cx) / width) ** 2).astype(np.float32) * vertical
+    img = Image.fromarray((shoulder * 255).astype(np.uint8), mode="L").filter(ImageFilter.GaussianBlur(max(1.0, size / 120)))
+    return np.asarray(img, dtype=np.float32) / 255.0
+
+
+def _portrait_background_suppression(image: Image.Image, size: int) -> np.ndarray:
+    """Return 1 where portrait content should be retained, 0-ish for background."""
+    focus = _face_focus_mask(image, size)
+    hair = _portrait_hair_map(image, size)
+    clothing = _portrait_clothing_map(image, size)
+    content = np.maximum(focus, np.maximum(hair * 0.90, clothing * 0.65))
+    return np.clip(0.08 + 0.92 * content, 0, 1)
+
+
+def build_v7_portrait_layers(image: Image.Image, size: int) -> dict[str, np.ndarray]:
+    """Build independent portrait-sculpting layers for V7 preview/debugging."""
+    return {
+        "face_structure": _portrait_structure_map(image, size),
+        "facial_features": _portrait_feature_map(image, size),
+        "hair_silhouette": _portrait_hair_map(image, size),
+        "clothing_silhouette": _portrait_clothing_map(image, size),
+        "background_suppression": _portrait_background_suppression(image, size),
+    }
+
+
+def apply_v7_portrait_sculpt(depth: np.ndarray, image: Image.Image, cfg: MemorialCoinConfig) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Fuse portrait layers into the photo depth map before V6 refinement."""
+    layers = build_v7_portrait_layers(image, depth.shape[0])
+    portrait_detail = np.clip(
+        layers["face_structure"] * np.clip(cfg.face_structure_strength, 0, 1)
+        + layers["facial_features"] * np.clip(cfg.feature_strength, 0, 1)
+        + layers["hair_silhouette"] * np.clip(cfg.hair_strength, 0, 1)
+        + layers["clothing_silhouette"] * np.clip(cfg.clothing_strength, 0, 1),
+        0, 1
+    )
+    mix = np.clip(cfg.portrait_sculpt_mix, 0, 1)
+    sculpted = np.clip(depth * (1.0 - mix) + portrait_detail * mix, 0, 1)
+    bg = np.clip(cfg.background_suppression, 0, 1)
+    sculpted *= layers["background_suppression"] * bg + (1.0 - bg)
+    return np.clip(sculpted, 0, 1), layers
+
+
 def make_memorial_coin_depth(image_bytes: bytes, cfg: MemorialCoinConfig) -> np.ndarray:
     image = Image.open(io.BytesIO(image_bytes))
     rcfg = cfg.relief
@@ -288,6 +385,9 @@ def make_memorial_coin_depth(image_bytes: bytes, cfg: MemorialCoinConfig) -> np.
         max(0.03, cfg.text_height_mm / max(0.1, rcfg.relief_height_mm)),
         cfg.text_mode,
     )
+
+    # V7 intelligent portrait sculpting before final production refinement.
+    depth, _v7_layers = apply_v7_portrait_sculpt(depth, image, cfg)
 
     # V6 surface refinement: conservative smoothing before final mask.
     depth = apply_v6_surface_refinement(depth, cfg)
@@ -578,5 +678,51 @@ def validate_v6_production(cfg: MemorialCoinConfig, inspection: dict | None = No
             "conservative relief wall control",
         ],
         "guideline": "V6 is a design-for-manufacture aid, not a manufacturing guarantee. Confirm final tolerances with the actual production shop.",
+    })
+    return report
+
+
+# ============================================================
+# V7 INTELLIGENT PORTRAIT SCULPTING / PRODUCTION REVIEW
+# ============================================================
+
+def validate_v7_production(cfg: MemorialCoinConfig, image: Image.Image | None = None,
+                           inspection: dict | None = None, production: dict | None = None) -> dict:
+    """Extend V6 review with portrait-layer coverage and sculpting controls."""
+    report = validate_v6_production(cfg, inspection, production)
+    checks = report["checks"]
+
+    def add(name, passed, message, severity="warning"):
+        checks.append({"name": name, "passed": bool(passed), "severity": severity, "message": message})
+
+    if image is not None:
+        layers = build_v7_portrait_layers(image, cfg.relief.resolution)
+        add("Face structure layer", float(layers["face_structure"].mean()) > 0.005,
+            f"Face-plane layer coverage: {float(layers['face_structure'].mean()):.3f}.")
+        add("Facial feature layer", float(layers["facial_features"].mean()) > 0.001,
+            f"Eye / nose / mouth layer coverage: {float(layers['facial_features'].mean()):.3f}.")
+        add("Hair / silhouette layer", float(layers["hair_silhouette"].mean()) > 0.001,
+            f"Hair / outer silhouette coverage: {float(layers['hair_silhouette'].mean()):.3f}.")
+        add("Clothing / shoulder layer", float(layers["clothing_silhouette"].mean()) > 0.001,
+            f"Shoulder / clothing coverage: {float(layers['clothing_silhouette'].mean()):.3f}.")
+    else:
+        add("Portrait layer preview", True, "Source image not supplied; geometry-only V7 review performed.")
+
+    mix = float(np.clip(cfg.portrait_sculpt_mix, 0, 1))
+    add("Portrait sculpt mix", 0.35 <= mix <= 0.95,
+        f"Portrait sculpt blend: {mix:.2f}. Recommended review range: 0.35–0.95.")
+    add("Background suppression", cfg.background_suppression >= 0.50,
+        f"Background suppression strength: {cfg.background_suppression:.2f}.")
+
+    failed = [c for c in checks if not c["passed"] and c["severity"] == "error"]
+    warning_count = sum(1 for c in checks if c["severity"] == "warning" and not c["passed"])
+    report.update({
+        "version": "V7", "status": "PASS" if not failed else "NEEDS REVIEW",
+        "production_ready": not failed, "failed_checks": len(failed), "warning_count": warning_count,
+        "v7_features": [
+            "face structure layer", "facial feature layer", "hair / silhouette layer",
+            "clothing / shoulder layer", "background suppression", "portrait sculpt blend",
+        ],
+        "guideline": "V7 is a layered portrait-relief design aid. Face, hair and clothing layers are image-space shaping approximations, not biometric landmarks or CAD geometry. Confirm final tolerances with the actual manufacturer.",
     })
     return report
