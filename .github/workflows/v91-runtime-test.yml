@@ -68,8 +68,8 @@ jobs:
           stl=generate_memorial_coin_stl(data,cfg)
           insp=inspect_memorial_coin(stl)
           assert insp["watertight"]
-          assert float(insp["volume"])>0
+          assert float(insp["volume_mm3"])>0
           print("V9.1 runtime smoke test: PASS")
-          print("STL:", len(stl), "bytes", "volume:", insp["volume"])
+          print("STL:", len(stl), "bytes", "volume:", insp["volume_mm3"])
           print("Report:", report["status"], "warnings:", report["warning_count"])
           PY
