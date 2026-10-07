@@ -6,3 +6,6 @@ trimesh>=4.0.0
 # Optional AI depth mode:
 # torch>=2.2.0
 # transformers>=4.45.0
+
+# Optional V3 face localization:
+# opencv-python-headless>=4.10.0
