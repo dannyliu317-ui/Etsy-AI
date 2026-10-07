@@ -687,8 +687,6 @@ if relief_file:
         build_v8_sculpt_channels,
         validate_v9_production,
         build_v9_artistic_channels,
-        validate_v9_production,
-        build_v9_artistic_channels,
     )
 
     col1, col2, col3 = st.columns(3)
@@ -847,27 +845,6 @@ if relief_file:
         st.info("V9 is an image-space artistic relief engine; it does not perform physically based metal rendering.")
 
 
-    st.subheader("✨ V9 Jewelry Relief Art Engine")
-    st.caption(
-        "V9 converts V8 portrait structure into jewelry-oriented relief using tone compression, "
-        "controlled edge crests, highlight bias, depth shaping, and metal-style presets."
-    )
-    v9_col1, v9_col2, v9_col3 = st.columns(3)
-    with v9_col1:
-        metal_style = st.selectbox(
-            "Metal / Relief Style",
-            ["Sterling Silver", "Yellow Gold", "Antique / Oxidized", "Soft Polished", "Deep Engraved"],
-            key="v9_metal_style",
-        )
-        relief_art_strength = st.slider("Relief Art Strength", 0.0, 1.0, 0.68, 0.05, key="v9_art_strength")
-        tone_compression = st.slider("Tone Compression", 0.0, 1.0, 0.62, 0.05, key="v9_tone_compression")
-    with v9_col2:
-        edge_crest_strength = st.slider("Edge Crest", 0.0, 1.0, 0.42, 0.05, key="v9_edge_crest")
-        highlight_sculpt_strength = st.slider("Highlight Sculpt", 0.0, 1.0, 0.38, 0.05, key="v9_highlight")
-        relief_depth_curve = st.slider("Relief Depth Curve", 0.55, 1.45, 0.92, 0.05, key="v9_depth_curve")
-    with v9_col3:
-        micro_detail_suppression = st.slider("Micro-detail Suppression", 0.0, 1.0, 0.35, 0.05, key="v9_micro_suppression")
-        st.info("V9 is an image-space artistic relief engine; it does not perform physically based metal rendering.")
 
     st.subheader("🛡️ V6 Production Refinement")
     v6_col1, v6_col2, v6_col3 = st.columns(3)
