@@ -624,12 +624,11 @@ def apply_v10_jewelry_production_curve(
     z = np.clip(z * (1.0 - detail_gate * detail_floor * 0.20), 0, 1)
 
     # Gentle perimeter fade keeps the final relief from terminating abruptly.
-    edge = np.minimum.reduce([
-        np.arange(z.shape[0])[:, None],
-        np.arange(z.shape[1])[None, :],
-        z.shape[0] - 1 - np.arange(z.shape[0])[:, None],
-        z.shape[1] - 1 - np.arange(z.shape[1])[None, :],
-    ]).astype(np.float32)
+    yy, xx = np.mgrid[0:z.shape[0], 0:z.shape[1]]
+    edge = np.minimum(
+        np.minimum(yy, xx),
+        np.minimum(z.shape[0] - 1 - yy, z.shape[1] - 1 - xx),
+    ).astype(np.float32)
     fade_width = max(2.0, z.shape[0] * max(cfg.v10_edge_fade, profile["edge_fade"]))
     fade = np.clip(edge / fade_width, 0, 1)
     return np.clip(z * (0.82 + 0.18 * fade), 0, 1)
