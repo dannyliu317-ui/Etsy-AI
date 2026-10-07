@@ -105,26 +105,54 @@ def _safe_face_detector():
         return None
 
 
-def _face_focus_mask(image: Image.Image, size: int) -> np.ndarray:
-    """Best-effort face localization.
+def _valid_face_boxes(gray: np.ndarray, detector, image_shape: tuple[int, int]) -> list:
+    """Filter implausibly small Haar detections before portrait sculpting.
 
-    OpenCV is optional. If unavailable or no face is found, returns a
-    conservative oval centered in the portrait rather than pretending
-    detection succeeded.
+    Lifestyle photos can produce tiny false-positive face boxes in the
+    background. V7-V10 should prefer a conservative no-detection fallback
+    over building portrait geometry around a false positive.
     """
+    height, width = image_shape
+    faces = detector.detectMultiScale(
+        gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40)
+    )
+    valid = []
+    min_width = max(48, int(width * 0.12))
+    min_area = max(48 * 48, int(width * height * 0.025))
+    for face in faces:
+        x, y, w, h = [int(v) for v in face]
+        if w >= min_width and h >= int(height * 0.08) and w * h >= min_area:
+            valid.append((x, y, w, h))
+    return valid
+
+
+def _portrait_fallback_focus(size: int) -> np.ndarray:
+    """Conservative centered portrait envelope when face detection is uncertain."""
+    yy, xx = np.mgrid[0:size, 0:size]
+    cx = size * 0.52
+    cy = size * 0.46
+    rx = size * 0.40
+    ry = size * 0.47
+    d = ((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2
+    return np.clip(np.exp(-1.55 * d).astype(np.float32), 0, 1)
+
+
+def _face_focus_mask(image: Image.Image, size: int) -> np.ndarray:
+    """Best-effort face localization with a conservative fallback."""
     try:
         import cv2
     except ImportError:
-        return np.ones((size, size), dtype=np.float32)
+        return _portrait_fallback_focus(size)
 
     rgb = np.asarray(ImageOps.exif_transpose(image).convert("RGB"))
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     detector = _safe_face_detector()
     if detector is None:
-        return np.ones((size, size), dtype=np.float32)
-    faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
-    if len(faces) == 0:
-        return np.ones((size, size), dtype=np.float32)
+        return _portrait_fallback_focus(size)
+
+    faces = _valid_face_boxes(gray, detector, (rgb.shape[0], rgb.shape[1]))
+    if not faces:
+        return _portrait_fallback_focus(size)
 
     x, y, w, h = max(faces, key=lambda f: int(f[2] * f[3]))
     cx = (x + w / 2) / max(1, rgb.shape[1]) * size
@@ -277,7 +305,7 @@ def _portrait_hair_map(image: Image.Image, size: int) -> np.ndarray:
 
 
 def _portrait_face_box(image: Image.Image):
-    """Return the largest detected face box in source-image pixels, if available."""
+    """Return the largest plausible face box in source-image pixels."""
     try:
         import cv2
     except ImportError:
@@ -287,8 +315,8 @@ def _portrait_face_box(image: Image.Image):
     detector = _safe_face_detector()
     if detector is None:
         return None
-    faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
-    if len(faces) == 0:
+    faces = _valid_face_boxes(gray, detector, (rgb.shape[0], rgb.shape[1]))
+    if not faces:
         return None
     return max(faces, key=lambda f: int(f[2] * f[3]))
 
