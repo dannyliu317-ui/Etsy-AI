@@ -658,14 +658,14 @@ if result:
 
 
 # =========================================================
-# PERSONALIZED PORTRAIT RELIEF PENDANT
+# V3 JEWELRY MEMORIAL PORTRAIT COIN
 # =========================================================
 
 st.divider()
-st.header("🪙 3. Personalized Portrait Relief Pendant")
+st.header("🪙 3. V3 Jewelry Memorial Portrait Coin")
 st.write(
-    "Create a portrait-style relief pendant from a photo, preview the "
-    "depth and shaded relief, export GLB/STL, and inspect production dimensions."
+    "Turn a portrait into a jewelry-style memorial coin relief with optional "
+    "face focus, raised border rings, personalized text, hanging hole, and STL inspection."
 )
 
 relief_file = st.file_uploader(
@@ -675,132 +675,153 @@ relief_file = st.file_uploader(
 )
 
 if relief_file:
+    from memorial_coin_v3 import (
+        MemorialCoinConfig,
+        generate_memorial_coin_stl,
+        make_memorial_coin_depth,
+        preview_memorial_coin,
+        inspect_memorial_coin,
+    )
+
     col1, col2, col3 = st.columns(3)
     with col1:
-        relief_mode = st.selectbox(
-            "Relief Mode", ["Portrait", "Photo"], key="relief_mode"
+        coin_style = st.selectbox(
+            "Coin Relief Style",
+            ["Classic Coin", "Deep Relief", "Soft Relief"],
+            key="v3_coin_style",
         )
         relief_shape = st.selectbox(
-            "Pendant Shape", ["Circle", "Oval", "Heart", "Dog Tag"], key="relief_shape"
+            "Pendant Shape",
+            ["Circle", "Oval", "Heart", "Dog Tag"],
+            key="v3_relief_shape",
         )
         relief_depth_mode = st.selectbox(
-            "Depth Method", ["AI Depth", "Grayscale"], key="relief_depth_mode"
+            "Depth Method",
+            ["AI Depth", "Grayscale"],
+            key="v3_relief_depth_mode",
         )
     with col2:
         relief_width = st.number_input(
-            "Width (mm)", 10.0, 100.0, 30.0, 1.0, key="relief_width"
+            "Width (mm)", 20.0, 100.0, 30.0, 1.0, key="v3_relief_width"
         )
         relief_height = st.number_input(
-            "Height (mm)", 10.0, 100.0, 30.0, 1.0, key="relief_height"
+            "Height (mm)", 20.0, 100.0, 30.0, 1.0, key="v3_relief_height"
         )
         relief_base = st.number_input(
-            "Base Thickness (mm)", 1.0, 8.0, 2.0, 0.1, key="relief_base"
+            "Base Thickness (mm)", 1.2, 8.0, 2.2, 0.1, key="v3_relief_base"
         )
     with col3:
         relief_z = st.number_input(
-            "Relief Height (mm)", 0.2, 4.0, 1.2, 0.1, key="relief_z"
+            "Portrait Relief Height (mm)", 0.4, 4.0, 1.1, 0.1, key="v3_relief_z"
         )
         relief_hole = st.number_input(
-            "Hanging Hole (mm)", 1.0, 8.0, 3.0, 0.1, key="relief_hole"
+            "Hanging Hole (mm)", 2.0, 8.0, 3.0, 0.1, key="v3_relief_hole"
         )
         relief_resolution = st.select_slider(
-            "Mesh Resolution", [120, 180, 240, 300], value=180, key="relief_resolution"
+            "Mesh Resolution", [160, 200, 240, 300], value=200, key="v3_relief_resolution"
         )
 
-    relief_invert = st.checkbox(
-        "Invert depth (flip raised/recessed relationship)",
-        value=False,
-        key="relief_invert",
-    )
-    relief_gamma = st.slider(
-        "Portrait Depth Gamma", 0.45, 1.60, 0.85, 0.05, key="relief_gamma",
-        help="Lower values preserve more mid-tone facial detail; higher values emphasize highlights."
+    face_focus = st.checkbox(
+        "🎯 Face focus / facial detail enhancement",
+        value=True,
+        key="v3_face_focus",
     )
 
-    relief_cfg = ReliefConfig(
-        width_mm=relief_width,
-        height_mm=relief_height,
-        base_thickness_mm=relief_base,
-        relief_height_mm=relief_z,
-        hole_diameter_mm=relief_hole,
-        resolution=relief_resolution,
-        shape=relief_shape,
-        depth_model=relief_depth_mode,
-        relief_mode=relief_mode,
-        invert_depth=relief_invert,
-        depth_gamma=relief_gamma,
+    st.subheader("⭕ Jewelry Coin Structure")
+    ring_col1, ring_col2, ring_col3 = st.columns(3)
+    with ring_col1:
+        border_width = st.slider("Outer Border Width (mm)", 0.5, 3.0, 1.2, 0.1, key="v3_border_width")
+    with ring_col2:
+        inner_ring = st.slider("Inner Ring Width (mm)", 0.2, 1.5, 0.55, 0.05, key="v3_inner_ring")
+    with ring_col3:
+        border_height = st.slider("Border Height (mm)", 0.1, 0.6, 0.25, 0.05, key="v3_border_height")
+
+    st.subheader("✍️ Personalization")
+    text_col1, text_col2, text_col3 = st.columns(3)
+    with text_col1:
+        memorial_text = st.text_input(
+            "Memorial Text",
+            placeholder="Example: Forever Loved • 1982–2026",
+            max_chars=36,
+            key="v3_memorial_text",
+        )
+    with text_col2:
+        text_mode = st.selectbox("Text Style", ["Raised", "Engraved"], key="v3_text_mode")
+    with text_col3:
+        text_position = st.selectbox("Text Position", ["Bottom", "Top", "Center"], key="v3_text_position")
+
+    cfg = MemorialCoinConfig(
+        relief=ReliefConfig(
+            width_mm=relief_width,
+            height_mm=relief_height,
+            base_thickness_mm=relief_base,
+            relief_height_mm=relief_z,
+            hole_diameter_mm=relief_hole,
+            resolution=relief_resolution,
+            shape=relief_shape,
+            depth_model=relief_depth_mode,
+            relief_mode="Photo",
+            invert_depth=False,
+            depth_gamma=0.85,
+        ),
+        coin_style=coin_style,
+        face_focus=face_focus,
+        border_width_mm=border_width,
+        border_height_mm=border_height,
+        inner_ring_width_mm=inner_ring,
+        text=memorial_text,
+        text_height_mm=0.25,
+        text_mode=text_mode,
+        text_position=text_position,
     )
 
-    warnings = validate_relief_config(relief_cfg)
-    for warning in warnings:
-        st.warning("⚠️ " + warning)
-
-    preview_col1, preview_col2 = st.columns(2)
-    if st.button("🔎 Preview Depth + Relief", use_container_width=True, key="preview_relief"):
+    if st.button("🔎 Preview V3 Portrait Coin", use_container_width=True, key="v3_preview"):
         try:
-            depth_preview = preview_heightmap(relief_file.getvalue(), relief_cfg)
-            shade_preview = preview_hillshade(relief_file.getvalue(), relief_cfg)
-            with preview_col1:
-                st.image(depth_preview, caption="Depth / Height Map", use_container_width=True)
-            with preview_col2:
-                st.image(shade_preview, caption="Simulated Relief Lighting", use_container_width=True)
+            with st.spinner("Analyzing portrait and building coin relief preview..."):
+                preview = preview_memorial_coin(relief_file.getvalue(), cfg)
+            st.image(preview, caption="V3 Jewelry Relief Height Map", use_container_width=True)
         except Exception as error:
-            st.error(f"Preview failed: {error}")
+            st.error(f"V3 preview failed: {error}")
 
     if st.button(
-        "🪙 Generate Portrait Relief STL",
+        "🪙 Generate V3 Memorial Coin STL",
         type="primary",
         use_container_width=True,
-        key="generate_relief_stl",
+        key="v3_generate_stl",
     ):
         try:
-            with st.spinner("Building watertight portrait relief mesh..."):
-                stl_bytes = generate_relief_stl(relief_file.getvalue(), relief_cfg)
-            st.session_state["relief_stl"] = stl_bytes
-            st.session_state["relief_cfg"] = relief_cfg
-            st.success("Portrait relief STL generated.")
-            inspection = inspect_stl(stl_bytes)
-            st.session_state["relief_inspection"] = inspection
+            with st.spinner("Building jewelry memorial coin STL..."):
+                stl_bytes = generate_memorial_coin_stl(relief_file.getvalue(), cfg)
+            inspection = inspect_memorial_coin(stl_bytes)
+            st.session_state["v3_stl"] = stl_bytes
+            st.session_state["v3_inspection"] = inspection
+            st.success("V3 memorial coin STL generated.")
         except Exception as error:
-            st.error(f"Relief STL generation failed: {error}")
+            st.error(f"V3 STL generation failed: {error}")
 
-    inspection = st.session_state.get("relief_inspection")
+    inspection = st.session_state.get("v3_inspection")
     if inspection:
-        st.subheader("📐 STL Production Check")
+        st.subheader("📐 Production Check")
         st.json(inspection)
         if inspection.get("watertight"):
             st.success("Mesh reports watertight.")
         else:
-            st.error("Mesh is not watertight. Do not send this file to production yet.")
+            st.error("Mesh is not watertight. Do not send this STL to production yet.")
 
-    if st.session_state.get("relief_stl"):
+    if st.session_state.get("v3_stl"):
         st.download_button(
-            "⬇️ Download STL",
-            st.session_state["relief_stl"],
-            "personalized_portrait_relief.stl",
+            "⬇️ Download V3 STL",
+            st.session_state["v3_stl"],
+            "jewelry_memorial_portrait_coin_v3.stl",
             "model/stl",
             use_container_width=True,
-            key="download_relief_stl",
+            key="v3_download_stl",
         )
 
-    if st.button("🧊 Generate 3D Preview (GLB)", use_container_width=True, key="generate_relief_glb"):
-        try:
-            with st.spinner("Building reduced 3D preview..."):
-                glb = export_relief_glb(relief_file.getvalue(), relief_cfg)
-            st.session_state["relief_glb"] = glb
-            st.success("GLB preview generated. Download and open it in a 3D viewer.")
-        except Exception as error:
-            st.error(f"3D preview failed: {error}")
-
-    if st.session_state.get("relief_glb"):
-        st.download_button(
-            "⬇️ Download 3D Preview GLB",
-            st.session_state["relief_glb"],
-            "personalized_portrait_relief.glb",
-            "model/gltf-binary",
-            use_container_width=True,
-            key="download_relief_glb",
-        )
+    st.info(
+        "V3 uses optional OpenCV face localization when available. If face detection "
+        "is unavailable, it safely falls back to the V2-style depth workflow."
+    )
 
 
 # =========================================================
