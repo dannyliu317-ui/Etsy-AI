@@ -797,6 +797,14 @@ if relief_file:
     with text_col3:
         text_position = st.selectbox("Text Position", ["Bottom", "Top", "Center"], key="v3_text_position")
 
+    # V5 auto-apply is authoritative at config build time.
+    if auto_apply:
+        relief_base = production_preset["base_mm"]
+        relief_z = production_preset["relief_mm"]
+        relief_hole = production_preset["hole_mm"]
+        border_width = production_preset["border_mm"]
+        border_height = production_preset["border_height_mm"]
+
     cfg = MemorialCoinConfig(
         relief=ReliefConfig(
             width_mm=relief_width,
