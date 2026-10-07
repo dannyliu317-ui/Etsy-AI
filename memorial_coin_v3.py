@@ -322,16 +322,6 @@ def apply_v7_portrait_sculpt(depth: np.ndarray, image: Image.Image, cfg: Memoria
     return np.clip(sculpted, 0, 1), layers
 
 
-
-def _gaussian_feature_map(size: int, face, points, scale_x=0.14, scale_y=0.10) -> np.ndarray:
-    x, y, w, hh = face
-    yy, xx = np.mgrid[0:size, 0:size]
-    sx, sy = size / max(1, _V8_IMAGE_WIDTH), size / max(1, _V8_IMAGE_HEIGHT)
-    # This helper is only used through _v8_face_geometry_map, which supplies
-    # normalized points. Kept private and image-space only.
-    return np.zeros((size, size), dtype=np.float32)
-
-
 def _v8_face_geometry(image: Image.Image, size: int):
     """Return normalized face geometry used for conservative jewelry sculpting."""
     face = _portrait_face_box(image)
