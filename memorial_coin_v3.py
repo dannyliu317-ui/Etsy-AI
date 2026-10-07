@@ -57,6 +57,13 @@ class MemorialCoinConfig:
     clothing_strength: float = 0.32
     background_suppression: float = 0.86
     portrait_sculpt_mix: float = 0.78
+    # V8 portrait-to-jewelry sculpt channels.
+    contour_strength: float = 0.62
+    eye_socket_strength: float = 0.58
+    nose_bridge_strength: float = 0.68
+    lip_strength: float = 0.55
+    chin_strength: float = 0.48
+    sculpt_detail_mix: float = 0.64
 
 
 def _face_focus_mask(image: Image.Image, size: int) -> np.ndarray:
@@ -315,6 +322,104 @@ def apply_v7_portrait_sculpt(depth: np.ndarray, image: Image.Image, cfg: Memoria
     return np.clip(sculpted, 0, 1), layers
 
 
+
+def _gaussian_feature_map(size: int, face, points, scale_x=0.14, scale_y=0.10) -> np.ndarray:
+    x, y, w, hh = face
+    yy, xx = np.mgrid[0:size, 0:size]
+    sx, sy = size / max(1, _V8_IMAGE_WIDTH), size / max(1, _V8_IMAGE_HEIGHT)
+    # This helper is only used through _v8_face_geometry_map, which supplies
+    # normalized points. Kept private and image-space only.
+    return np.zeros((size, size), dtype=np.float32)
+
+
+def _v8_face_geometry(image: Image.Image, size: int):
+    """Return normalized face geometry used for conservative jewelry sculpting."""
+    face = _portrait_face_box(image)
+    if face is None:
+        return None
+    rgb = np.asarray(ImageOps.exif_transpose(image).convert("RGB"))
+    x, y, w, h = face
+    sx, sy = size / rgb.shape[1], size / rgb.shape[0]
+    return (
+        (x * sx, y * sy, (x + w) * sx, (y + h) * sy),
+        rgb.shape[1],
+        rgb.shape[0],
+    )
+
+
+def _v8_soft_ellipse(size: int, cx: float, cy: float, rx: float, ry: float) -> np.ndarray:
+    yy, xx = np.mgrid[0:size, 0:size]
+    return np.exp(-(((xx - cx) / max(1.0, rx)) ** 2 + ((yy - cy) / max(1.0, ry)) ** 2)).astype(np.float32)
+
+
+def _v8_contour_map(image: Image.Image, size: int) -> np.ndarray:
+    geom = _v8_face_geometry(image, size)
+    if geom is None:
+        return np.zeros((size, size), dtype=np.float32)
+    (x0, y0, x1, y1), _, _ = geom
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    rx, ry = max(8.0, (x1 - x0) * 0.56), max(10.0, (y1 - y0) * 0.62)
+    outer = _v8_soft_ellipse(size, cx, cy, rx, ry)
+    inner = _v8_soft_ellipse(size, cx, cy, rx * 0.82, ry * 0.82)
+    return np.clip(outer - inner * 0.72, 0, 1)
+
+
+def _v8_feature_channels(image: Image.Image, size: int) -> dict[str, np.ndarray]:
+    """Build independent eye-socket, nose, lip and chin sculpt channels.
+
+    Coordinates are conservative proportions of the detected face box. They
+    are not facial landmarks and should be treated as jewelry-relief guides.
+    """
+    geom = _v8_face_geometry(image, size)
+    if geom is None:
+        empty = np.zeros((size, size), dtype=np.float32)
+        return {k: empty.copy() for k in ("eye_sockets", "nose_bridge", "lips", "chin")}
+
+    (x0, y0, x1, y1), _, _ = geom
+    fw, fh = max(8.0, x1 - x0), max(8.0, y1 - y0)
+    eye_left = _v8_soft_ellipse(size, x0 + fw * 0.30, y0 + fh * 0.39, fw * 0.14, fh * 0.085)
+    eye_right = _v8_soft_ellipse(size, x0 + fw * 0.70, y0 + fh * 0.39, fw * 0.14, fh * 0.085)
+    eye_bridge = _v8_soft_ellipse(size, x0 + fw * 0.50, y0 + fh * 0.47, fw * 0.075, fh * 0.20)
+    nose_tip = _v8_soft_ellipse(size, x0 + fw * 0.50, y0 + fh * 0.60, fw * 0.13, fh * 0.10)
+    upper_lip = _v8_soft_ellipse(size, x0 + fw * 0.50, y0 + fh * 0.70, fw * 0.20, fh * 0.075)
+    lower_lip = _v8_soft_ellipse(size, x0 + fw * 0.50, y0 + fh * 0.75, fw * 0.17, fh * 0.075)
+    chin = _v8_soft_ellipse(size, x0 + fw * 0.50, y0 + fh * 0.88, fw * 0.25, fh * 0.12)
+
+    return {
+        "eye_sockets": np.clip(np.maximum(eye_left, eye_right), 0, 1),
+        "nose_bridge": np.clip(np.maximum(eye_bridge, nose_tip), 0, 1),
+        "lips": np.clip(np.maximum(upper_lip, lower_lip), 0, 1),
+        "chin": np.clip(chin, 0, 1),
+    }
+
+
+def build_v8_sculpt_channels(image: Image.Image, size: int) -> dict[str, np.ndarray]:
+    """Return V8 jewelry-sculpt channels for inspection and preview."""
+    channels = _v8_feature_channels(image, size)
+    channels["face_contour"] = _v8_contour_map(image, size)
+    return channels
+
+
+def apply_v8_jewelry_sculpt(
+    depth: np.ndarray, image: Image.Image, cfg: MemorialCoinConfig
+) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Add controlled facial structure channels after V7 portrait separation."""
+    channels = build_v8_sculpt_channels(image, depth.shape[0])
+    detail = (
+        channels["face_contour"] * np.clip(cfg.contour_strength, 0, 1)
+        + channels["eye_sockets"] * np.clip(cfg.eye_socket_strength, 0, 1)
+        + channels["nose_bridge"] * np.clip(cfg.nose_bridge_strength, 0, 1)
+        + channels["lips"] * np.clip(cfg.lip_strength, 0, 1)
+        + channels["chin"] * np.clip(cfg.chin_strength, 0, 1)
+    )
+    detail = np.clip(detail, 0, 1)
+    mix = np.clip(cfg.sculpt_detail_mix, 0, 1)
+
+    # Add the channels conservatively rather than replacing the V7 portrait.
+    sculpted = np.clip(depth * (1.0 - mix) + np.maximum(depth, detail) * mix, 0, 1)
+    return sculpted, channels
+
+
 def make_memorial_coin_depth(image_bytes: bytes, cfg: MemorialCoinConfig) -> np.ndarray:
     image = Image.open(io.BytesIO(image_bytes))
     rcfg = cfg.relief
@@ -388,6 +493,8 @@ def make_memorial_coin_depth(image_bytes: bytes, cfg: MemorialCoinConfig) -> np.
 
     # V7 intelligent portrait sculpting before final production refinement.
     depth, _v7_layers = apply_v7_portrait_sculpt(depth, image, cfg)
+    # V8 jewelry sculpting: contour and individual facial-structure channels.
+    depth, _v8_channels = apply_v8_jewelry_sculpt(depth, image, cfg)
 
     # V6 surface refinement: conservative smoothing before final mask.
     depth = apply_v6_surface_refinement(depth, cfg)
@@ -724,5 +831,63 @@ def validate_v7_production(cfg: MemorialCoinConfig, image: Image.Image | None = 
             "clothing / shoulder layer", "background suppression", "portrait sculpt blend",
         ],
         "guideline": "V7 is a layered portrait-relief design aid. Face, hair and clothing layers are image-space shaping approximations, not biometric landmarks or CAD geometry. Confirm final tolerances with the actual manufacturer.",
+    })
+    return report
+
+
+# ============================================================
+# V8 JEWELRY SCULPT / PRODUCTION REVIEW
+# ============================================================
+
+def validate_v8_production(cfg: MemorialCoinConfig, image: Image.Image | None = None,
+                           inspection: dict | None = None, production: dict | None = None) -> dict:
+    """Extend V7 review with independent facial sculpt-channel checks."""
+    report = validate_v7_production(cfg, image, inspection, production)
+    checks = report["checks"]
+
+    def add(name, passed, message, severity="warning"):
+        checks.append({"name": name, "passed": bool(passed), "severity": severity, "message": message})
+
+    if image is not None:
+        channels = build_v8_sculpt_channels(image, cfg.relief.resolution)
+        names = {
+            "face_contour": "Face contour channel",
+            "eye_sockets": "Eye socket channel",
+            "nose_bridge": "Nose bridge channel",
+            "lips": "Lip channel",
+            "chin": "Chin channel",
+        }
+        for key, label in names.items():
+            coverage = float(channels[key].mean())
+            add(label, coverage > 0.0005, f"{label} coverage: {coverage:.4f}.")
+
+    mix = float(np.clip(cfg.sculpt_detail_mix, 0, 1))
+    add(
+        "V8 sculpt detail mix",
+        0.25 <= mix <= 0.85,
+        f"V8 detail blend: {mix:.2f}. Recommended review range: 0.25–0.85.",
+    )
+
+    failed = [c for c in checks if not c["passed"] and c["severity"] == "error"]
+    warning_count = sum(1 for c in checks if c["severity"] == "warning" and not c["passed"])
+    report.update({
+        "version": "V8",
+        "status": "PASS" if not failed else "NEEDS REVIEW",
+        "production_ready": not failed,
+        "failed_checks": len(failed),
+        "warning_count": warning_count,
+        "v8_features": [
+            "face contour",
+            "eye socket",
+            "nose bridge",
+            "lip structure",
+            "chin structure",
+            "jewelry sculpt detail mix",
+        ],
+        "guideline": (
+            "V8 adds conservative image-space facial sculpt channels. "
+            "They are proportional shaping guides rather than biometric landmarks "
+            "or CAD-native anatomy. Confirm final geometry with the manufacturer."
+        ),
     })
     return report
