@@ -11,7 +11,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install
-        run: python -m pip install "numpy>=1.26.0" "pillow>=10.0.0" "trimesh>=4.0.0" "streamlit>=1.40.0"
+        run: python -m pip install "numpy>=1.26.0" "pillow>=10.0.0" "trimesh>=4.0.0" "scipy>=1.11.0" "streamlit>=1.40.0"
       - name: Compile
         run: python -m py_compile app.py memorial_coin_v3.py relief_generator.py
       - name: Runtime V1-V9
