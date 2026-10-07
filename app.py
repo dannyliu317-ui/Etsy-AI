@@ -831,7 +831,7 @@ if relief_file:
                 preview = preview_memorial_coin(relief_file.getvalue(), cfg)
             st.image(preview, caption="V4 Jewelry Relief Height Map", use_container_width=True)
         except Exception as error:
-            st.error(f"V3 preview failed: {error}")
+            st.error(f"V5 preview failed: {error}")
 
     if st.button(
         "🪙 Generate V4 Memorial Coin STL",
@@ -847,7 +847,7 @@ if relief_file:
             st.session_state["v4_inspection"] = inspection
             st.success("V4 memorial coin STL generated.")
         except Exception as error:
-            st.error(f"V3 STL generation failed: {error}")
+            st.error(f"V5 STL generation failed: {error}")
 
     inspection = st.session_state.get("v4_inspection")
     if inspection:
@@ -858,11 +858,11 @@ if relief_file:
         else:
             st.error("Mesh is not watertight. Do not send this STL to production yet.")
 
-    if st.session_state.get("v3_stl"):
+    if st.session_state.get("v4_stl"):
         st.download_button(
-            "⬇️ Download V3 STL",
-            st.session_state["v3_stl"],
-            "jewelry_memorial_portrait_coin_v4.stl",
+            "⬇️ Download V5 STL",
+            st.session_state["v4_stl"],
+            "jewelry_memorial_portrait_coin_v5.stl",
             "model/stl",
             use_container_width=True,
             key="v3_download_stl",
