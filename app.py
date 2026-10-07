@@ -736,6 +736,44 @@ if relief_file:
     with sculpt_col3:
         background_flatten = st.slider("Background Flattening", 0.0, 1.0, 0.78, 0.05, key="v4_background_flatten")
 
+    st.subheader("🏭 V5 Production Mode")
+    from memorial_coin_v3 import get_production_preset, validate_memorial_coin_production
+
+    prod_col1, prod_col2 = st.columns(2)
+    with prod_col1:
+        production_size = st.selectbox(
+            "Jewelry Size Preset",
+            ["25mm Coin", "30mm Coin", "35mm Coin"],
+            index=1,
+            key="v5_production_size",
+        )
+    with prod_col2:
+        production_process = st.selectbox(
+            "Manufacturing Process",
+            ["Jewelry Casting", "Resin / 3D Print", "CNC / Engraving"],
+            key="v5_production_process",
+        )
+
+    production_preset = get_production_preset(production_size, production_process)
+    st.caption(
+        f"Auto guideline: base {production_preset['base_mm']:.2f} mm · "
+        f"relief {production_preset['relief_mm']:.2f} mm · "
+        f"min detail {production_preset['min_detail_mm']:.2f} mm · "
+        f"min text line {production_preset['min_text_line_mm']:.2f} mm"
+    )
+
+    auto_apply = st.checkbox(
+        "⚙️ Apply V5 production preset to base / relief / hole / border",
+        value=True,
+        key="v5_auto_apply",
+    )
+    if auto_apply:
+        relief_base = production_preset["base_mm"]
+        relief_z = production_preset["relief_mm"]
+        relief_hole = production_preset["hole_mm"]
+        border_width = production_preset["border_mm"]
+        border_height = production_preset["border_height_mm"]
+
     st.subheader("⭕ Jewelry Coin Structure")
     ring_col1, ring_col2, ring_col3 = st.columns(3)
     with ring_col1:
@@ -811,7 +849,7 @@ if relief_file:
         except Exception as error:
             st.error(f"V3 STL generation failed: {error}")
 
-    inspection = st.session_state.get("v3_inspection")
+    inspection = st.session_state.get("v4_inspection")
     if inspection:
         st.subheader("📐 Production Check")
         st.json(inspection)
@@ -831,7 +869,7 @@ if relief_file:
         )
 
     st.info(
-        "V4 uses optional OpenCV face localization when available. Face feature protection, hair/silhouette preservation, and background flattening are shaping aids rather than biometric identification. If face detection "
+        "V5 adds production presets, process-aware guidelines, and manufacturability checks. V4 uses optional OpenCV face localization when available. Face feature protection, hair/silhouette preservation, and background flattening are shaping aids rather than biometric identification. If face detection "
         "is unavailable, it safely falls back to the V2-style depth workflow."
     )
 
