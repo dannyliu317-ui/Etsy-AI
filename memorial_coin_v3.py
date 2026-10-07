@@ -320,3 +320,121 @@ def inspect_memorial_coin(stl_bytes: bytes) -> dict:
     result = inspect_stl(stl_bytes)
     result["product_type"] = "Jewelry Memorial Portrait Coin"
     return result
+
+
+# ============================================================
+# V5 PRODUCTION / MANUFACTURABILITY ENGINE
+# ============================================================
+
+PRODUCTION_PRESETS = {
+    "25mm Coin": {
+        "diameter_mm": 25.0, "base_mm": 2.0, "relief_mm": 0.9,
+        "border_mm": 1.0, "border_height_mm": 0.22,
+        "min_detail_mm": 0.30, "min_text_line_mm": 0.28,
+        "edge_radius_mm": 0.18, "hole_mm": 2.8,
+    },
+    "30mm Coin": {
+        "diameter_mm": 30.0, "base_mm": 2.3, "relief_mm": 1.1,
+        "border_mm": 1.2, "border_height_mm": 0.25,
+        "min_detail_mm": 0.35, "min_text_line_mm": 0.30,
+        "edge_radius_mm": 0.20, "hole_mm": 3.0,
+    },
+    "35mm Coin": {
+        "diameter_mm": 35.0, "base_mm": 2.5, "relief_mm": 1.25,
+        "border_mm": 1.4, "border_height_mm": 0.28,
+        "min_detail_mm": 0.40, "min_text_line_mm": 0.32,
+        "edge_radius_mm": 0.22, "hole_mm": 3.2,
+    },
+}
+
+PROCESS_PRESETS = {
+    "Jewelry Casting": {
+        "relief_factor": 1.0, "text_factor": 1.0,
+        "min_detail_factor": 1.0, "min_text_factor": 1.0,
+        "hole_edge_factor": 1.0,
+    },
+    "Resin / 3D Print": {
+        "relief_factor": 0.95, "text_factor": 0.95,
+        "min_detail_factor": 0.90, "min_text_factor": 0.90,
+        "hole_edge_factor": 0.90,
+    },
+    "CNC / Engraving": {
+        "relief_factor": 0.85, "text_factor": 0.85,
+        "min_detail_factor": 1.20, "min_text_factor": 1.20,
+        "hole_edge_factor": 1.15,
+    },
+}
+
+
+def get_production_preset(size_preset: str, process: str) -> dict:
+    """Return manufacturing-oriented defaults.
+
+    Values are design guidelines, not process guarantees. Final limits must
+    be confirmed with the actual caster, printer, CNC shop, alloy and toolchain.
+    """
+    size = PRODUCTION_PRESETS.get(size_preset, PRODUCTION_PRESETS["30mm Coin"]).copy()
+    proc = PROCESS_PRESETS.get(process, PROCESS_PRESETS["Jewelry Casting"])
+    size["relief_mm"] *= proc["relief_factor"]
+    size["min_detail_mm"] *= proc["min_detail_factor"]
+    size["min_text_line_mm"] *= proc["min_text_factor"]
+    size["process"] = process
+    size["size_preset"] = size_preset
+    return size
+
+
+def validate_memorial_coin_production(cfg: MemorialCoinConfig, inspection: dict | None = None,
+                                      production: dict | None = None) -> dict:
+    """Validate geometry settings and optional STL inspection for production review."""
+    p = production or get_production_preset("30mm Coin", "Jewelry Casting")
+    checks = []
+    warnings = []
+
+    def check(name, passed, message, severity="error"):
+        checks.append({"name": name, "passed": bool(passed), "severity": severity, "message": message})
+
+    r = cfg.relief
+    min_detail = float(p["min_detail_mm"])
+    min_text = float(p["min_text_line_mm"])
+    edge_clearance = max(r.hole_diameter_mm * 0.75, 1.0)
+
+    check("Base thickness", r.base_thickness_mm >= 1.5,
+          f"Base {r.base_thickness_mm:.2f} mm; recommended minimum review threshold is 1.50 mm.")
+    check("Relief-to-base ratio", r.relief_height_mm <= r.base_thickness_mm * 0.65,
+          f"Relief/base = {r.relief_height_mm / max(r.base_thickness_mm, 0.01):.2f}.")
+    check("Minimum detail guideline", min_detail >= 0.20,
+          f"Target minimum detail width: {min_detail:.2f} mm.", "warning")
+    check("Hole clearance", r.hole_diameter_mm >= 2.5,
+          f"Hanging hole diameter: {r.hole_diameter_mm:.2f} mm.")
+    check("Hole position", r.hole_offset_mm >= 0,
+          f"Hole offset: {r.hole_offset_mm:.2f} mm.", "warning")
+    check("Border continuity", cfg.border_width_mm >= 0.6,
+          f"Outer border width: {cfg.border_width_mm:.2f} mm.")
+    check("Text stroke guideline", min_text >= 0.20,
+          f"Recommended text line width target: {min_text:.2f} mm.", "warning")
+
+    if cfg.text.strip():
+        estimated_text_height = max(0.01, cfg.text_height_mm)
+        check("Personalization relief", estimated_text_height >= 0.16,
+              f"Text relief: {estimated_text_height:.2f} mm.", "warning")
+
+    if inspection:
+        check("STL watertight", bool(inspection.get("watertight")),
+              "Mesh is reported watertight." if inspection.get("watertight") else "Mesh is not reported watertight.")
+        check("STL volume", float(inspection.get("volume", 0) or 0) > 0,
+              "Mesh has positive volume." if float(inspection.get("volume", 0) or 0) > 0 else "Mesh volume is zero.")
+        dims = inspection.get("dimensions") or inspection.get("bounds")
+        if dims:
+            warnings.append(f"Measured STL dimensions: {dims}")
+
+    failed = [c for c in checks if not c["passed"] and c["severity"] == "error"]
+    warning_count = sum(1 for c in checks if c["severity"] == "warning" and not c["passed"])
+    return {
+        "status": "PASS" if not failed else "NEEDS REVIEW",
+        "production_ready": not failed,
+        "failed_checks": len(failed),
+        "warning_count": warning_count,
+        "checks": checks,
+        "guideline": "Design guidelines only — confirm final tolerances with your manufacturer.",
+        "preset": p,
+        "warnings": warnings,
+    }
