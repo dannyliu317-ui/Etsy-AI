@@ -662,7 +662,7 @@ if result:
 # =========================================================
 
 st.divider()
-st.header("🪙 3. V3 Jewelry Memorial Portrait Coin")
+st.header("🪙 3. V4 Jewelry Memorial Portrait Coin")
 st.write(
     "Turn a portrait into a jewelry-style memorial coin relief with optional "
     "face focus, raised border rings, personalized text, hanging hole, and STL inspection."
@@ -727,6 +727,15 @@ if relief_file:
         key="v3_face_focus",
     )
 
+    st.subheader("🧑‍🎨 V4 Portrait Sculpting")
+    sculpt_col1, sculpt_col2, sculpt_col3 = st.columns(3)
+    with sculpt_col1:
+        feature_protection = st.slider("Face Feature Protection", 0.0, 1.0, 0.72, 0.05, key="v4_feature_protection")
+    with sculpt_col2:
+        hair_preservation = st.slider("Hair / Silhouette Preservation", 0.0, 1.0, 0.45, 0.05, key="v4_hair_preservation")
+    with sculpt_col3:
+        background_flatten = st.slider("Background Flattening", 0.0, 1.0, 0.78, 0.05, key="v4_background_flatten")
+
     st.subheader("⭕ Jewelry Coin Structure")
     ring_col1, ring_col2, ring_col3 = st.columns(3)
     with ring_col1:
@@ -773,18 +782,21 @@ if relief_file:
         text_height_mm=0.25,
         text_mode=text_mode,
         text_position=text_position,
+        feature_protection=feature_protection,
+        hair_preservation=hair_preservation,
+        background_flatten=background_flatten,
     )
 
-    if st.button("🔎 Preview V3 Portrait Coin", use_container_width=True, key="v3_preview"):
+    if st.button("🔎 Preview V4 Portrait Coin", use_container_width=True, key="v3_preview"):
         try:
             with st.spinner("Analyzing portrait and building coin relief preview..."):
                 preview = preview_memorial_coin(relief_file.getvalue(), cfg)
-            st.image(preview, caption="V3 Jewelry Relief Height Map", use_container_width=True)
+            st.image(preview, caption="V4 Jewelry Relief Height Map", use_container_width=True)
         except Exception as error:
             st.error(f"V3 preview failed: {error}")
 
     if st.button(
-        "🪙 Generate V3 Memorial Coin STL",
+        "🪙 Generate V4 Memorial Coin STL",
         type="primary",
         use_container_width=True,
         key="v3_generate_stl",
@@ -793,9 +805,9 @@ if relief_file:
             with st.spinner("Building jewelry memorial coin STL..."):
                 stl_bytes = generate_memorial_coin_stl(relief_file.getvalue(), cfg)
             inspection = inspect_memorial_coin(stl_bytes)
-            st.session_state["v3_stl"] = stl_bytes
-            st.session_state["v3_inspection"] = inspection
-            st.success("V3 memorial coin STL generated.")
+            st.session_state["v4_stl"] = stl_bytes
+            st.session_state["v4_inspection"] = inspection
+            st.success("V4 memorial coin STL generated.")
         except Exception as error:
             st.error(f"V3 STL generation failed: {error}")
 
@@ -812,14 +824,14 @@ if relief_file:
         st.download_button(
             "⬇️ Download V3 STL",
             st.session_state["v3_stl"],
-            "jewelry_memorial_portrait_coin_v3.stl",
+            "jewelry_memorial_portrait_coin_v4.stl",
             "model/stl",
             use_container_width=True,
             key="v3_download_stl",
         )
 
     st.info(
-        "V3 uses optional OpenCV face localization when available. If face detection "
+        "V4 uses optional OpenCV face localization when available. Face feature protection, hair/silhouette preservation, and background flattening are shaping aids rather than biometric identification. If face detection "
         "is unavailable, it safely falls back to the V2-style depth workflow."
     )
 
