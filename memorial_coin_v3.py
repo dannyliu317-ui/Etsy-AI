@@ -272,7 +272,8 @@ def make_memorial_coin_depth(image_bytes: bytes, cfg: MemorialCoinConfig) -> np.
     border = outer & ~inner
     ring = inner & ~inner2
     border_strength = min(0.45, max(0.03, cfg.border_height_mm / max(0.1, rcfg.relief_height_mm)))
-    ring_strength = border_strength * 0.55\n    depth = np.clip(depth + border.astype(np.float32) * border_strength + ring.astype(np.float32) * ring_strength, 0, 1)
+    ring_strength = border_strength * 0.55
+    depth = np.clip(depth + border.astype(np.float32) * border_strength + ring.astype(np.float32) * ring_strength, 0, 1)
 
     depth = _add_text_height(
         depth,
