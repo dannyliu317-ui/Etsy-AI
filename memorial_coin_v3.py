@@ -81,6 +81,23 @@ class MemorialCoinConfig:
     portrait_micro_detail: float = 0.38
 
 
+def _safe_face_detector():
+    """Return an OpenCV Haar detector when available; otherwise None."""
+    try:
+        import cv2
+        classifier = getattr(cv2, "CascadeClassifier", None)
+        data = getattr(cv2, "data", None)
+        cascade_dir = getattr(data, "haarcascades", None) if data is not None else None
+        if classifier is None or not cascade_dir:
+            return None
+        detector = classifier(cascade_dir + "haarcascade_frontalface_default.xml")
+        if getattr(detector, "empty", lambda: True)():
+            return None
+        return detector
+    except Exception:
+        return None
+
+
 def _face_focus_mask(image: Image.Image, size: int) -> np.ndarray:
     """Best-effort face localization.
 
@@ -95,8 +112,9 @@ def _face_focus_mask(image: Image.Image, size: int) -> np.ndarray:
 
     rgb = np.asarray(ImageOps.exif_transpose(image).convert("RGB"))
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    cascade = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    detector = cv2.CascadeClassifier(cascade)
+    detector = _safe_face_detector()
+    if detector is None:
+        return np.ones((size, size), dtype=np.float32)
     faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
     if len(faces) == 0:
         return np.ones((size, size), dtype=np.float32)
@@ -197,8 +215,9 @@ def _portrait_feature_map(image: Image.Image, size: int) -> np.ndarray:
 
     rgb = np.asarray(ImageOps.exif_transpose(image).convert("RGB"))
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    cascade = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    detector = cv2.CascadeClassifier(cascade)
+    detector = _safe_face_detector()
+    if detector is None:
+        return np.zeros((size, size), dtype=np.float32)
     faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
     if len(faces) == 0:
         return np.zeros((size, size), dtype=np.float32)
@@ -232,7 +251,9 @@ def _portrait_hair_map(image: Image.Image, size: int) -> np.ndarray:
 
     rgb = np.asarray(ImageOps.exif_transpose(image).convert("RGB"))
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    detector = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    detector = _safe_face_detector()
+    if detector is None:
+        return np.zeros((size, size), dtype=np.float32)
     faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
     if len(faces) == 0:
         return np.zeros((size, size), dtype=np.float32)
@@ -256,7 +277,9 @@ def _portrait_face_box(image: Image.Image):
         return None
     rgb = np.asarray(ImageOps.exif_transpose(image).convert("RGB"))
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    detector = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    detector = _safe_face_detector()
+    if detector is None:
+        return None
     faces = detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
     if len(faces) == 0:
         return None
