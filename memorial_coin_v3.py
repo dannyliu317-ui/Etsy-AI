@@ -79,6 +79,13 @@ class MemorialCoinConfig:
     hair_strand_preservation: float = 0.62
     background_zero_strength: float = 0.92
     portrait_micro_detail: float = 0.38
+    # V10 jewelry production profile.
+    production_process: str = "Jewelry Casting"
+    production_profile: str = "Balanced Portrait"
+    v10_surface_flatten: float = 0.34
+    v10_peak_limit: float = 0.88
+    v10_detail_floor: float = 0.16
+    v10_edge_fade: float = 0.10
 
 
 def _safe_face_detector():
@@ -542,6 +549,92 @@ def apply_v9_jewelry_artistic_relief(
 
 
 
+
+# ============================================================
+# V10 JEWELRY PRODUCTION ENGINE
+# ============================================================
+
+V10_PRODUCTION_PROFILES = {
+    "Balanced Portrait": {
+        "surface_flatten": 0.34,
+        "peak_limit": 0.88,
+        "detail_floor": 0.16,
+        "edge_fade": 0.10,
+    },
+    "High Relief Portrait": {
+        "surface_flatten": 0.22,
+        "peak_limit": 0.96,
+        "detail_floor": 0.12,
+        "edge_fade": 0.08,
+    },
+    "Fine Detail Pendant": {
+        "surface_flatten": 0.42,
+        "peak_limit": 0.82,
+        "detail_floor": 0.20,
+        "edge_fade": 0.14,
+    },
+    "Soft Memorial Coin": {
+        "surface_flatten": 0.52,
+        "peak_limit": 0.76,
+        "detail_floor": 0.24,
+        "edge_fade": 0.18,
+    },
+}
+
+V10_PROCESS_LIMITS = {
+    "Jewelry Casting": {"peak": 0.92, "detail": 0.14, "edge": 0.12},
+    "Resin / 3D Print": {"peak": 0.98, "detail": 0.08, "edge": 0.06},
+    "CNC / Engraving": {"peak": 0.82, "detail": 0.20, "edge": 0.16},
+}
+
+
+def apply_v10_jewelry_production_curve(
+    depth: np.ndarray, cfg: MemorialCoinConfig
+) -> np.ndarray:
+    """Convert V9.1 artistic relief into a conservative production-oriented curve.
+
+    This is heightmap shaping, not a claim of process-specific manufacturing
+    tolerances. The goal is to reduce broad plateaus, cap extreme peaks, keep
+    meaningful portrait detail, and gently fade the perimeter.
+    """
+    profile = V10_PRODUCTION_PROFILES.get(
+        cfg.production_profile, V10_PRODUCTION_PROFILES["Balanced Portrait"]
+    )
+    process = V10_PROCESS_LIMITS.get(
+        cfg.production_process, V10_PROCESS_LIMITS["Jewelry Casting"]
+    )
+
+    z = np.clip(depth.astype(np.float32), 0, 1)
+    flatten = np.clip(cfg.v10_surface_flatten if cfg.v10_surface_flatten is not None
+                       else profile["surface_flatten"], 0, 0.80)
+    peak_limit = np.clip(min(cfg.v10_peak_limit, process["peak"]), 0.55, 1.0)
+    detail_floor = np.clip(max(cfg.v10_detail_floor, process["detail"]), 0.0, 0.50)
+
+    # Soft shoulder compression preserves gradients while reducing flat, broad peaks.
+    broad = _v9_blur(z, max(0.7, z.shape[0] / 95.0))
+    z = z * (1.0 - flatten * 0.42) + broad * (flatten * 0.42)
+
+    # Soft cap rather than hard clipping, avoiding a visible plateau.
+    z = peak_limit * np.tanh(z / max(1e-4, peak_limit))
+    z = np.clip(z / max(1e-4, np.max(z)), 0, 1)
+
+    # Protect useful detail above a configurable floor.
+    local = np.abs(z - _v9_blur(z, max(0.6, z.shape[0] / 140.0)))
+    detail_gate = np.clip(local * 6.0, 0, 1)
+    z = np.clip(z * (1.0 - detail_gate * detail_floor * 0.20), 0, 1)
+
+    # Gentle perimeter fade keeps the final relief from terminating abruptly.
+    edge = np.minimum.reduce([
+        np.arange(z.shape[0])[:, None],
+        np.arange(z.shape[1])[None, :],
+        z.shape[0] - 1 - np.arange(z.shape[0])[:, None],
+        z.shape[1] - 1 - np.arange(z.shape[1])[None, :],
+    ]).astype(np.float32)
+    fade_width = max(2.0, z.shape[0] * max(cfg.v10_edge_fade, profile["edge_fade"]))
+    fade = np.clip(edge / fade_width, 0, 1)
+    return np.clip(z * (0.82 + 0.18 * fade), 0, 1)
+
+
 # ============================================================
 # V9.1 PORTRAIT JEWELRY REFINEMENT
 # ============================================================
@@ -774,6 +867,9 @@ def make_memorial_coin_depth(image_bytes: bytes, cfg: MemorialCoinConfig) -> np.
     depth, _v8_channels = apply_v8_jewelry_sculpt(depth, image, cfg)
     depth, _v9_channels = apply_v9_jewelry_artistic_relief(depth, image, cfg)
     depth, _v91_channels = apply_v91_portrait_jewelry_refinement(depth, image, cfg)
+
+    # V10 production curve runs immediately before V6 final surface smoothing.
+    depth = apply_v10_jewelry_production_curve(depth, cfg)
 
     # V6 surface refinement: conservative smoothing before final mask.
     depth = apply_v6_surface_refinement(depth, cfg)
@@ -1231,6 +1327,80 @@ def validate_v91_production(cfg: MemorialCoinConfig, image: Image.Image | None =
             "V9.1 is a portrait-specific image-space jewelry-relief refinement. "
             "It is not biometric landmark detection or a physically based metal renderer. "
             "Confirm final geometry and manufacturing tolerances with the actual production shop."
+        ),
+    })
+    return report
+
+
+
+# ============================================================
+# V10 JEWELRY PRODUCTION REVIEW
+# ============================================================
+
+def validate_v10_production(
+    cfg: MemorialCoinConfig,
+    image: Image.Image | None = None,
+    inspection: dict | None = None,
+    production: dict | None = None,
+) -> dict:
+    """Extend V9.1 checks with V10 process/profile checks."""
+    report = validate_v91_production(cfg, image, inspection, production)
+    checks = report["checks"]
+
+    process_ok = cfg.production_process in V10_PROCESS_LIMITS
+    profile_ok = cfg.production_profile in V10_PRODUCTION_PROFILES
+    checks.append({
+        "name": "V10 production process",
+        "passed": process_ok,
+        "severity": "warning",
+        "message": f"Process: {cfg.production_process}.",
+    })
+    checks.append({
+        "name": "V10 production profile",
+        "passed": profile_ok,
+        "severity": "warning",
+        "message": f"Profile: {cfg.production_profile}.",
+    })
+
+    process = V10_PROCESS_LIMITS.get(cfg.production_process, V10_PROCESS_LIMITS["Jewelry Casting"])
+    checks.append({
+        "name": "V10 peak limit",
+        "passed": 0.55 <= cfg.v10_peak_limit <= process["peak"],
+        "severity": "warning",
+        "message": f"Peak limit: {cfg.v10_peak_limit:.2f}; process ceiling: {process['peak']:.2f}.",
+    })
+    checks.append({
+        "name": "V10 detail floor",
+        "passed": process["detail"] <= cfg.v10_detail_floor <= 0.50,
+        "severity": "warning",
+        "message": f"Detail floor: {cfg.v10_detail_floor:.2f}; process floor: {process['detail']:.2f}.",
+    })
+    checks.append({
+        "name": "V10 edge fade",
+        "passed": 0.04 <= cfg.v10_edge_fade <= 0.30,
+        "severity": "warning",
+        "message": f"Edge fade: {cfg.v10_edge_fade:.2f}.",
+    })
+
+    failed = [c for c in checks if not c["passed"] and c["severity"] == "error"]
+    warnings = sum(1 for c in checks if c["severity"] == "warning" and not c["passed"])
+    report.update({
+        "version": "V10",
+        "status": "PASS" if not failed else "NEEDS REVIEW",
+        "production_ready": not failed,
+        "failed_checks": len(failed),
+        "warning_count": warnings,
+        "v10_features": [
+            "process-aware production curve",
+            "soft peak limiting",
+            "broad surface flattening",
+            "detail-floor protection",
+            "perimeter relief fade",
+            "production profile presets",
+        ],
+        "guideline": (
+            "V10 is a production-oriented image-space heightmap curve. "
+            "Process profiles are design guidelines, not guaranteed foundry/CNC/print tolerances."
         ),
     })
     return report
